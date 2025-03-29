@@ -90,6 +90,13 @@ where
         };
         let cursor = cursor - bounds.position();
         match event {
+            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Right)) => {
+                self.draw_lines.borrow_mut().pop();
+                self.draw_lines_cache.clear();
+                self.draw_cache.clear();
+                state.draw = false;
+                (Status::Ignored, None)
+            }
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                 state.draw = true;
                 (Status::Ignored, None)
@@ -109,6 +116,7 @@ where
                 };
                 self.draw_lines.borrow_mut().push(location3d);
                 self.draw_lines_cache.clear();
+                self.draw_cache.clear();
                 state.draw = false;
                 (Status::Ignored, None)
             }
@@ -174,6 +182,9 @@ where
             });
 
         let draw_cache = self.draw_cache.draw(renderer, bounds.size(), |frame| {
+            if !state.draw {
+                return;
+            }
             let Some(cursor) = cursor.position() else {
                 return;
             };
