@@ -14,12 +14,12 @@ use zoomer::ZoomViewer;
 use iced::Alignment::Center;
 use iced::Length::Fill;
 use iced::widget::{Image, button, center, column, row, slider, stack, text};
-use iced::{Element, Length, Point, Size, Task, Theme};
+use iced::{Element, Length, Size, Task, Theme};
 use perspective::compute::{
     ComputeSolution, Lines, StoreLine, StorePoint, StorePoint3d, compute_adapter,
     read_points_from_file, store_scene_data_to_file,
 };
-use tracing::trace;
+use tracing::{trace, warn};
 use tracing_subscriber::EnvFilter;
 
 #[derive(Parser, Debug)]
@@ -27,7 +27,7 @@ use tracing_subscriber::EnvFilter;
 struct Args {
     #[arg(short, long)]
     points: Option<String>,
-    #[arg(short, long, value_delimiter = ' ', num_args = 1..,default_value = "perspective.jpg")]
+    #[arg(short, long, value_delimiter = ' ', num_args = 1.., default_value = "perspective.jpg")]
     images: Vec<String>,
 }
 
@@ -48,21 +48,15 @@ enum Message {
     Save,
     CalculateAndSaveToFile,
     LoadApplicationState {
-        control_point: Option<Point>,
-        scale: Option<(Point, Point)>,
-        lines: Option<Vec<(Point, Point)>>,
-        export_file_name: String,
-        points_file_name: String,
-        image_size: (u32, u32),
-        points: Option<Vec<Vector3<f32>>>,
-        images: Option<Vec<String>>,
+        image_data: Option<ImageData>,
+        image_size: Size<u32>,
     },
     SelectImage(u8),
 }
 
 #[derive(Default)]
 struct Perspective {
-    axis_data: Rc<RefCell<AxisData>>,
+    axis_data: Option<Rc<RefCell<AxisData>>>,
     image_path: String,
     points_file_name: String,
     export_file_name: String,
@@ -72,85 +66,40 @@ struct Perspective {
     draw: bool,
     draw_lines: Rc<RefCell<Vec<Vector3<f32>>>>,
     selected_image: u8,
-    images: Option<Vec<String>>,
-}
-
-async fn load(
     images: Vec<String>,
-    points: Option<String>,
-    image_to_load: usize,
-) -> (
-    Vec<String>,
-    Option<(
-        Point,
-        (Point, Point),
-        Vec<(Point, Point)>,
-        Option<Vec<Vector3<f32>>>,
-    )>,
-    String,
-    String,
-    (u32, u32),
-) {
-    let image = images.get(image_to_load).unwrap();
-    let image_name = Path::new(image).file_stem().unwrap();
-    let export_file_name = format!("{}.fspy", image_name.to_str().unwrap());
-    let lines = if let Some(points) = points {
-        (Some(read_points_from_file(&points)), points)
+}
+#[derive(Debug, Clone)]
+struct ImageData {
+    axis_data: AxisData,
+    lines: Option<Vec<Vector3<f32>>>,
+}
+async fn load(image: String, points_file_name: String) -> (Option<ImageData>, Size<u32>) {
+    let extracted_data = if Path::new(&points_file_name).exists() {
+        let read_from_file = read_points_from_file(&points_file_name);
+        Some(ImageData {
+            axis_data: AxisData {
+                axis_lines: read_from_file.2,
+                control_point: read_from_file.0,
+                scale: read_from_file.1,
+            },
+            lines: read_from_file.3,
+        })
     } else {
-        let points = format!("{}.points", image_name.to_str().unwrap());
-
-        let out = if Path::new(&points).exists() {
-            Some(read_points_from_file(&points))
-        } else {
-            None
-        };
-        (out, points)
+        warn!("could not read data for {}", points_file_name);
+        None
     };
-    let decoded_image = image::ImageReader::open(image).unwrap().decode().unwrap();
+
+    let decoded_image = image::ImageReader::open(&image).unwrap().decode().unwrap();
     (
-        images,
-        lines.0,
-        lines.1,
-        export_file_name,
-        (decoded_image.width(), decoded_image.height()),
+        extracted_data,
+        Size::new(decoded_image.width(), decoded_image.height()),
     )
 }
 
-fn extract_state(
-    state: (
-        Vec<String>,
-        Option<(
-            Point,
-            (Point, Point),
-            Vec<(Point, Point)>,
-            Option<Vec<Vector3<f32>>>,
-        )>,
-        String,
-        String,
-        (u32, u32),
-    ),
-) -> Message {
-    match state.1 {
-        Some((control_point, scale, lines, points)) => Message::LoadApplicationState {
-            images: Some(state.0),
-            control_point: Some(control_point),
-            scale: Some(scale),
-            lines: Some(lines),
-            points_file_name: state.2,
-            export_file_name: state.3,
-            image_size: state.4,
-            points,
-        },
-        _ => Message::LoadApplicationState {
-            images: None,
-            control_point: None,
-            scale: None,
-            lines: None,
-            points_file_name: state.2,
-            export_file_name: state.3,
-            image_size: state.4,
-            points: None,
-        },
+fn extract_state(state: (Option<ImageData>, Size<u32>)) -> Message {
+    Message::LoadApplicationState {
+        image_data: state.0,
+        image_size: state.1,
     }
 }
 
@@ -158,21 +107,29 @@ impl Perspective {
     fn new() -> (Self, Task<Message>) {
         let args = Args::parse();
         trace!("args {:?}", args);
-
         let draw_lines = Rc::new(RefCell::new(vec![Vector3::<f32>::zeros()]));
+        let first_image = args.images.get(0).unwrap().clone();
+        let image_name = Path::new(&first_image)
+            .file_stem()
+            .unwrap()
+            .to_str()
+            .unwrap();
+        let points = if args.points.is_none() {
+            format!("{}.points", image_name)
+        } else {
+            args.points.unwrap()
+        };
+        let export_file_name = format!("{}.fspy", image_name);
         let init = Perspective {
-            axis_data: Rc::new(RefCell::new(AxisData {
-                control_point: Point::new(0.5, 0.5),
-                scale: (Point::new(0.5, 0.5), Point::new(0.75, 0.75)),
-                ..AxisData::default()
-            })),
-            image_path: args.images.first().unwrap().clone(),
+            image_path: first_image.clone(),
             draw_lines,
+            images: args.images,
+            export_file_name,
             ..Self::default()
         };
         (
             init,
-            Task::perform(load(args.images, args.points, 0), extract_state),
+            Task::perform(load(first_image, points), extract_state),
         )
     }
 
@@ -180,9 +137,10 @@ impl Perspective {
         match message {
             Message::Save => {
                 let mut file = File::create(self.points_file_name.clone()).unwrap();
-
-                let lines = self
-                    .axis_data
+                let Some(axis_data) = &self.axis_data else {
+                    return;
+                };
+                let lines = axis_data
                     .borrow()
                     .axis_lines
                     .iter()
@@ -191,10 +149,10 @@ impl Perspective {
                 let store = Lines {
                     lines,
                     control_point: StorePoint {
-                        x: self.axis_data.borrow().control_point.x,
-                        y: self.axis_data.borrow().control_point.y,
+                        x: axis_data.borrow().control_point.x,
+                        y: axis_data.borrow().control_point.y,
                     },
-                    scale: StoreLine::from(&self.axis_data.borrow().scale),
+                    scale: StoreLine::from(&axis_data.borrow().scale),
                     points: Some(
                         self.draw_lines
                             .borrow()
@@ -211,21 +169,24 @@ impl Perspective {
                     .unwrap();
             }
             Message::CalculateAndSaveToFile => {
+                let Some(axis_data) = &self.axis_data else {
+                    return;
+                };
                 let lines_x = [
-                    self.axis_data.borrow().axis_lines[0],
-                    self.axis_data.borrow().axis_lines[1],
+                    axis_data.borrow().axis_lines[0],
+                    axis_data.borrow().axis_lines[1],
                 ];
                 let lines_y = [
-                    self.axis_data.borrow().axis_lines[2],
-                    self.axis_data.borrow().axis_lines[3],
+                    axis_data.borrow().axis_lines[2],
+                    axis_data.borrow().axis_lines[3],
                 ];
                 let lines_z = [
-                    self.axis_data.borrow().axis_lines[4],
-                    self.axis_data.borrow().axis_lines[5],
+                    axis_data.borrow().axis_lines[4],
+                    axis_data.borrow().axis_lines[5],
                 ];
 
-                let control_point = &self.axis_data.borrow().control_point;
-                let scale = &self.axis_data.borrow().scale;
+                let control_point = &axis_data.borrow().control_point;
+                let scale = &axis_data.borrow().scale;
                 self.compute_solution = Some(block_on(async {
                     let compute_solution = compute_adapter(
                         lines_x,
@@ -252,60 +213,18 @@ impl Perspective {
                 }));
             }
             Message::LoadApplicationState {
-                images: additional_images,
-                control_point,
-                scale,
-                lines,
-                points_file_name,
-                export_file_name,
+                image_data,
                 image_size,
-                points,
             } => {
-                self.points_file_name = points_file_name;
-                if let Some(control_point) = control_point {
-                    self.axis_data.borrow_mut().control_point = control_point;
-                }
-                if let Some(scale) = scale {
-                    self.axis_data.borrow_mut().scale = scale;
-                }
-                if let Some(lines) = lines {
-                    self.axis_data.borrow_mut().axis_lines = lines;
+                self.image_width = image_size.width;
+                self.image_height = image_size.height;
+                if let Some(image_data) = image_data {
+                    self.axis_data = Some(Rc::new(RefCell::new(image_data.axis_data)));
+                    if let Some(lines) = image_data.lines {
+                        self.draw_lines = Rc::new(RefCell::new(lines));
+                    }
                 } else {
-                    self.axis_data.borrow_mut().axis_lines = vec![
-                        (
-                            Point::new(0.49291667, 0.8496296),
-                            Point::new(0.66791666, 0.6798148),
-                        ),
-                        (
-                            Point::new(0.315, 0.27925926),
-                            Point::new(0.50166667, 0.17685185),
-                        ),
-                        (
-                            Point::new(0.47104168, 0.8211111),
-                            Point::new(0.27052084, 0.6020371),
-                        ),
-                        (
-                            Point::new(0.5264583, 0.18981482),
-                            Point::new(0.81083333, 0.3622222),
-                        ),
-                        (
-                            Point::new(0.6715625, 0.5838889),
-                            Point::new(0.68833333, 0.11722221),
-                        ),
-                        (
-                            Point::new(0.32958332, 0.58518517),
-                            Point::new(0.30770832, 0.05111111),
-                        ),
-                    ];
-                }
-                self.export_file_name = export_file_name;
-                self.image_width = image_size.0;
-                self.image_height = image_size.1;
-                if let Some(points) = points {
-                    self.draw_lines = Rc::new(RefCell::new(points));
-                }
-                if additional_images.is_some() {
-                    self.images = additional_images;
+                    self.axis_data = Some(Rc::new(RefCell::new(AxisData::default())));
                 }
             }
             Message::Draw => {
@@ -313,11 +232,25 @@ impl Perspective {
             }
             Message::SelectImage(selected) => {
                 self.selected_image = selected;
+                let selected_image_name = self
+                    .images
+                    .get(self.selected_image as usize)
+                    .unwrap()
+                    .clone();
+                let points_file_name = Path::new(&selected_image_name)
+                    .file_stem()
+                    .unwrap()
+                    .to_str()
+                    .unwrap();
+                let selected_image_points_file_name = format!("{}.points", points_file_name);
+                self.update(extract_state(block_on(async {
+                    load(selected_image_name, selected_image_points_file_name).await
+                })));
             }
         }
     }
     fn view(&self) -> Element<Message> {
-        let Some(images) = &self.images else {
+        if self.axis_data.is_none() {
             return center(text("Loading...").width(Fill).align_x(Center).size(50)).into();
         };
         let component: Element<Message> = if self.draw {
@@ -327,34 +260,32 @@ impl Perspective {
                 .height(Length::Fill)
                 .into()
         } else {
-            ComputeCameraPose::new(Rc::clone(&self.axis_data), &self.compute_solution)
-                .image_size(Size::new(self.image_width as f32, self.image_height as f32))
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .into()
-        };
-
-        let additional_images: u8 = if let Some(additional_images) = &self.images {
-            additional_images.len() as u8
-        } else {
-            1
+            ComputeCameraPose::new(
+                self.axis_data.as_ref().unwrap().clone(),
+                &self.compute_solution,
+            )
+            .image_size(Size::new(self.image_width as f32, self.image_height as f32))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
         };
 
         column!(
             row!(
                 column!(stack!(
-                    ZoomViewer::new(images.get(self.selected_image as usize).unwrap()).scale(2.0),
+                    ZoomViewer::new(self.images.get(self.selected_image as usize).unwrap())
+                        .scale(2.0),
                     component,
                 ),)
                 .width(Length::Fill),
                 column!(
                     slider(
-                        0..=additional_images - 1,
+                        0u8..=(self.images.len() - 1) as u8,
                         self.selected_image,
                         Message::SelectImage
                     )
                     .width(300),
-                    Image::new(images.get(self.selected_image as usize).unwrap())
+                    Image::new(self.images.get(self.selected_image as usize).unwrap())
                         .content_fit(iced::ContentFit::Cover)
                         .width(300)
                         .height(200)

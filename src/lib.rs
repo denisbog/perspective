@@ -75,9 +75,44 @@ pub struct PerspectiveState {
     pub edit: Edit,
 }
 
-#[derive(Default)]
+#[derive(Debug, Clone)]
 pub struct AxisData {
     pub axis_lines: Vec<(Point, Point)>,
     pub control_point: Point,
     pub scale: (Point, Point),
+}
+
+impl Default for AxisData {
+    fn default() -> Self {
+        Self {
+            control_point: Point::new(0.5, 0.5),
+            scale: (Point::new(0.5, 0.5), Point::new(0.75, 0.75)),
+            axis_lines: vec![
+                (
+                    Point::new(0.49291667, 0.8496296),
+                    Point::new(0.66791666, 0.6798148),
+                ),
+                (
+                    Point::new(0.315, 0.27925926),
+                    Point::new(0.50166667, 0.17685185),
+                ),
+                (
+                    Point::new(0.47104168, 0.8211111),
+                    Point::new(0.27052084, 0.6020371),
+                ),
+                (
+                    Point::new(0.5264583, 0.18981482),
+                    Point::new(0.81083333, 0.3622222),
+                ),
+                (
+                    Point::new(0.6715625, 0.5838889),
+                    Point::new(0.68833333, 0.11722221),
+                ),
+                (
+                    Point::new(0.32958332, 0.58518517),
+                    Point::new(0.30770832, 0.05111111),
+                ),
+            ],
+        }
+    }
 }
