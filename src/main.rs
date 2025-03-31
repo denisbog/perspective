@@ -77,12 +77,8 @@ async fn load(image: String, points_file_name: String) -> (Option<ImageData>, Si
     let extracted_data = if Path::new(&points_file_name).exists() {
         let read_from_file = read_points_from_file(&points_file_name);
         Some(ImageData {
-            axis_data: AxisData {
-                axis_lines: read_from_file.2,
-                control_point: read_from_file.0,
-                scale: read_from_file.1,
-            },
-            lines: read_from_file.3,
+            axis_data: read_from_file.0,
+            lines: read_from_file.1,
         })
     } else {
         warn!("could not read data for {}", points_file_name);
@@ -108,7 +104,7 @@ impl Perspective {
         let args = Args::parse();
         trace!("args {:?}", args);
         let draw_lines = Rc::new(RefCell::new(vec![Vector3::<f32>::zeros()]));
-        let first_image = args.images.get(0).unwrap().clone();
+        let first_image = args.images.first().unwrap().clone();
         let image_name = Path::new(&first_image)
             .file_stem()
             .unwrap()

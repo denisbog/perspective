@@ -9,7 +9,8 @@ use tokio_util::{bytes::BytesMut, codec::Encoder};
 use tracing::trace;
 
 use crate::{
-    FSpyData, SceneSettings, encoder::FSpyEncoder, fspy::compute_solution_to_scene_settings,
+    AxisData, FSpyData, SceneSettings, encoder::FSpyEncoder,
+    fspy::compute_solution_to_scene_settings,
 };
 
 #[derive(Serialize, Deserialize)]
@@ -44,14 +45,7 @@ impl From<&(Point, Point)> for StoreLine {
     }
 }
 
-pub fn read_points_from_file(
-    points: &String,
-) -> (
-    Point,
-    (Point, Point),
-    Vec<(Point, Point)>,
-    Option<Vec<Vector3<f32>>>,
-) {
+pub fn read_points_from_file(points: &String) -> (AxisData, Option<Vec<Vector3<f32>>>) {
     trace!("reading points from file {points}");
     let mut file = File::open(points).unwrap();
     let mut content = String::new();
@@ -95,7 +89,15 @@ pub fn read_points_from_file(
             .map(|point| Vector3::new(point.x, point.y, point.z))
             .collect()
     });
-    (control_point, scale, lines, points)
+
+    (
+        AxisData {
+            control_point,
+            scale,
+            axis_lines: lines,
+        },
+        points,
+    )
 }
 
 pub fn adaptor_compute_solution_to_scene_settings(

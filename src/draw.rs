@@ -1,7 +1,7 @@
 use std::{cell::RefCell, f32, marker::PhantomData, rc::Rc};
 
 use iced::{
-    Color, Element, Length, Point, Rectangle, Size, Vector,
+    Color, Element, Length, Pixels, Point, Rectangle, Size, Vector,
     advanced::{
         Clipboard, Layout, Shell, Widget,
         graphics::geometry::{self},
@@ -165,11 +165,22 @@ where
                     .collect();
 
                 let mut builder = canvas::path::Builder::new();
-                points.windows(2).for_each(|items| {
+                points.windows(2).enumerate().for_each(|(index, items)| {
                     let start = items[0];
                     let end = items[1];
                     builder.move_to(start);
                     builder.line_to(end);
+                    let location3d = *self.draw_lines.borrow().get(index + 1).unwrap();
+                    frame.fill_text(Text {
+                        content: format!(
+                            "{:>7.2},{:>7.2},{:>7.2}",
+                            location3d.x, location3d.y, location3d.z
+                        ),
+                        position: Point::new(end.x + 4.0, end.y + 4.0),
+                        color: Color::from_rgba(0.8, 0.8, 0.8, 0.8),
+                        size: Pixels(10.0),
+                        ..Default::default()
+                    });
                 });
 
                 let path = builder.build();
@@ -221,8 +232,9 @@ where
                     "{:>5.2},\n{:>5.2},\n{:>5.2}",
                     location3d.x, location3d.y, location3d.z
                 ),
-                position: Point::new(cursor.x + 10.0, cursor.y + 10.0),
+                position: Point::new(cursor.x + 8.0, cursor.y + 8.0),
                 color: Color::from_rgba(0.8, 0.8, 0.8, 0.8),
+                size: Pixels(12.0),
                 ..Default::default()
             });
 
@@ -302,7 +314,7 @@ where
         *matrix.index_mut((1, 2)) = -compute_solution.ortho_center.y;
 
         let transform = matrix * compute_solution.view_transform;
-        let point = Point3::from(location3d.clone());
+        let point = Point3::from(*location3d);
 
         let point = transform * point.to_homogeneous();
         let point = Point3::from_homogeneous(point).unwrap();
