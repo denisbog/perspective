@@ -20,9 +20,7 @@ use nalgebra::{Matrix3, Perspective3, Point3, Vector2, Vector3};
 
 use crate::{
     Component, Edit,
-    compute::{
-        ComputeSolution, line_insert_with_axis, line_insert_with_plane, relative_to_image_plane,
-    },
+    compute::{ComputeSolution, line_insert_with_plane, relative_to_image_plane},
 };
 
 pub struct DrawLine<'a, Message, Theme = iced::Theme, Renderer = iced::Renderer>

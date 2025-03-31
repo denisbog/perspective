@@ -399,12 +399,12 @@ pub fn line_insert_with_axis(
 
 pub fn line_insert_with_plane(
     plane_point: &Vector3<f32>,
-    direction: &Vector3<f32>,
-    a3d: &Vector3<f32>,
-    b3d: &Vector3<f32>,
+    normal_to_plane: &Vector3<f32>,
+    a: &Vector3<f32>,
+    b: &Vector3<f32>,
 ) -> Vector3<f32> {
-    let t = direction.dot(&(a3d - plane_point)) / -(b3d - a3d).dot(direction);
-    a3d + (b3d - a3d) * t
+    let t = normal_to_plane.dot(&(a - plane_point)) / -normal_to_plane.dot(&(b - a));
+    a + (b - a) * t
 }
 
 // https://paulbourke.net/geometry/pointlineplane/lineline.c
