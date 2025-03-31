@@ -20,7 +20,9 @@ use nalgebra::{Matrix3, Perspective3, Point3, Vector2, Vector3};
 
 use crate::{
     Component, Edit,
-    compute::{ComputeSolution, line_insert_with_z_axis, relative_to_image_plane},
+    compute::{
+        ComputeSolution, line_insert_with_axis, line_insert_with_plane, relative_to_image_plane,
+    },
 };
 
 pub struct DrawLine<'a, Message, Theme = iced::Theme, Renderer = iced::Renderer>
@@ -91,9 +93,11 @@ where
         let cursor = cursor - bounds.position();
         match event {
             Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Right)) => {
-                self.draw_lines.borrow_mut().pop();
-                self.draw_lines_cache.clear();
-                self.draw_cache.clear();
+                if self.draw_lines.borrow().len() > 1 {
+                    self.draw_lines.borrow_mut().pop();
+                    self.draw_lines_cache.clear();
+                    self.draw_cache.clear();
+                }
                 state.draw = false;
                 (Status::Ignored, None)
             }
@@ -158,7 +162,7 @@ where
                     .draw_lines
                     .borrow()
                     .iter()
-                    .flat_map(|item| self.calculate_cursor_position_to_2d(state, bounds, item))
+                    .flat_map(|item| self.calculate_location_position_to_2d(state, bounds, item))
                     .map(|item| Point::new(item.x, item.y))
                     .collect();
 
@@ -203,11 +207,12 @@ where
             };
 
             let Some(last_point) =
-                self.calculate_cursor_position_to_2d(state, bounds, last_point_3d)
+                self.calculate_location_position_to_2d(state, bounds, last_point_3d)
             else {
                 return;
             };
-            let Some(new_point) = self.calculate_cursor_position_to_2d(state, bounds, &location3d)
+            let Some(new_point) =
+                self.calculate_location_position_to_2d(state, bounds, &location3d)
             else {
                 return;
             };
@@ -240,7 +245,7 @@ where
 
     fn calculate_cursor_position_to_3d(
         &self,
-        _state: &State,
+        state: &State,
         bounds: Rectangle,
         cursor: &Vector,
     ) -> Option<Vector3<f32>> {
@@ -260,18 +265,26 @@ where
 
         let model_view_projection = matrix * compute_solution.view_transform;
         let model_view_projection = model_view_projection.try_inverse().unwrap();
-        let point = model_view_projection * Point3::new(0.0, 0.0, 0.0).to_homogeneous();
+        let last_point_axis = Vector3::zeros();
+        let point = model_view_projection * Point3::from(last_point_axis).to_homogeneous();
         let point3d1 = Point3::from_homogeneous(point).unwrap();
 
         let point = Point3::new(click_location.x, click_location.y, 1.0).to_homogeneous();
         let point = model_view_projection * point;
 
         let point3d2 = Point3::from_homogeneous(point).unwrap();
-        let intersection1_3d = line_insert_with_z_axis(&point3d1.coords, &point3d2.coords);
+        let last_point = self.draw_lines.borrow().last().cloned().unwrap();
+        let axis = if let Edit::EditZ = state.edit_state {
+            Vector3::new(1.0, 0.0, 0.0)
+        } else {
+            Vector3::new(0.0, 0.0, 1.0)
+        };
+        let intersection1_3d =
+            line_insert_with_plane(&last_point, &axis, &point3d1.coords, &point3d2.coords);
         Some(intersection1_3d)
     }
 
-    fn calculate_cursor_position_to_2d(
+    fn calculate_location_position_to_2d(
         &self,
         _state: &State,
         bounds: Rectangle,
@@ -291,10 +304,11 @@ where
         *matrix.index_mut((1, 2)) = -compute_solution.ortho_center.y;
 
         let transform = matrix * compute_solution.view_transform;
-        let point = nalgebra::Point3::new(location3d.x, location3d.y, location3d.z);
+        let point = Point3::from(location3d.clone());
 
         let point = transform * point.to_homogeneous();
         let point = Point3::from_homogeneous(point).unwrap();
+
         Some(dc_to_image.transform_point(&point.xy()).coords)
     }
 }

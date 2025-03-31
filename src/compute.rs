@@ -299,7 +299,7 @@ pub async fn compute_camera_pose(
         .collect::<Vec<Vector3<f32>>>();
     trace!("point3d {:#?}", point3d);
 
-    let intersection1_3d = line_insert_with_x_axis(&point3d[0], &point3d[1]);
+    let intersection1_3d = line_insert_with_yz_plane(&point3d[0], &point3d[1]);
     trace!("intersection3d: {intersection1_3d}");
     let intersection2_3d = intersection1_3d + Vector3::new(1.0, 0.0, 0.0);
 
@@ -369,7 +369,7 @@ pub fn triangle_ortho_center(x: &Vector2<f32>, y: &Vector2<f32>, z: &Vector2<f32
     Vector2::new(x, y)
 }
 
-pub fn line_insert_with_x_axis(
+pub fn line_insert_with_yz_plane(
     control_point_a3d: &Vector3<f32>,
     control_point_b3d: &Vector3<f32>,
 ) -> Vector3<f32> {
@@ -377,7 +377,7 @@ pub fn line_insert_with_x_axis(
     line_insert_with_axis(&axis, control_point_a3d, control_point_b3d)
 }
 
-pub fn line_insert_with_z_axis(
+pub fn line_insert_with_xy_plane(
     control_point_a3d: &Vector3<f32>,
     control_point_b3d: &Vector3<f32>,
 ) -> Vector3<f32> {
@@ -389,8 +389,22 @@ pub fn line_insert_with_axis(
     control_point_a3d: &Vector3<f32>,
     control_point_b3d: &Vector3<f32>,
 ) -> Vector3<f32> {
-    let t = axis.dot(control_point_a3d) / -(control_point_b3d - control_point_a3d).dot(axis);
-    control_point_a3d + (control_point_b3d - control_point_a3d) * t
+    line_insert_with_plane(
+        &Vector3::zeros(),
+        axis,
+        control_point_a3d,
+        control_point_b3d,
+    )
+}
+
+pub fn line_insert_with_plane(
+    plane_point: &Vector3<f32>,
+    direction: &Vector3<f32>,
+    a3d: &Vector3<f32>,
+    b3d: &Vector3<f32>,
+) -> Vector3<f32> {
+    let t = direction.dot(&(a3d - plane_point)) / -(b3d - a3d).dot(direction);
+    a3d + (b3d - a3d) * t
 }
 
 // https://paulbourke.net/geometry/pointlineplane/lineline.c
