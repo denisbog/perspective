@@ -42,6 +42,7 @@ pub fn main() -> iced::Result {
         .centered()
         .run_with(Perspective::new)
 }
+
 #[derive(Debug, Clone)]
 enum Message {
     Draw,
@@ -52,6 +53,7 @@ enum Message {
         image_size: Size<u32>,
     },
     SelectImage(u8),
+    Flip(bool, bool, bool),
 }
 
 #[derive(Default)]
@@ -73,12 +75,17 @@ struct ImageData {
     axis_data: AxisData,
     lines: Option<Vec<Vector3<f32>>>,
 }
-async fn load(image: String, points_file_name: String) -> (Option<ImageData>, Size<u32>) {
+async fn load(
+    image: String,
+    points_file_name: String,
+    load_lines: bool,
+) -> (Option<ImageData>, Size<u32>) {
     let extracted_data = if Path::new(&points_file_name).exists() {
         let read_from_file = read_points_from_file(&points_file_name);
+        let lines = if load_lines { read_from_file.1 } else { None };
         Some(ImageData {
             axis_data: read_from_file.0,
-            lines: read_from_file.1,
+            lines,
         })
     } else {
         warn!("could not read data for {}", points_file_name);
@@ -121,11 +128,12 @@ impl Perspective {
             draw_lines,
             images: args.images,
             export_file_name,
+            points_file_name: points.clone(),
             ..Self::default()
         };
         (
             init,
-            Task::perform(load(first_image, points), extract_state),
+            Task::perform(load(first_image, points, true), extract_state),
         )
     }
 
@@ -160,6 +168,11 @@ impl Perspective {
                             })
                             .collect(),
                     ),
+                    flip: Some([
+                        axis_data.borrow().flip.0,
+                        axis_data.borrow().flip.1,
+                        axis_data.borrow().flip.2,
+                    ]),
                 };
                 file.write_all(&serde_json::to_vec(&store).unwrap())
                     .unwrap();
@@ -192,6 +205,7 @@ impl Perspective {
                         self.image_height,
                         control_point,
                         scale,
+                        axis_data.borrow().flip,
                     )
                     .await
                     .unwrap();
@@ -238,10 +252,17 @@ impl Perspective {
                     .unwrap()
                     .to_str()
                     .unwrap();
-                let selected_image_points_file_name = format!("{}.points", points_file_name);
+                self.points_file_name = format!("{}.points", points_file_name);
                 self.update(extract_state(block_on(async {
-                    load(selected_image_name, selected_image_points_file_name).await
+                    load(selected_image_name, self.points_file_name.clone(), false).await
                 })));
+                self.update(Message::CalculateAndSaveToFile);
+            }
+            Message::Flip(flip_x, flip_y, flip_z) => {
+                let Some(axis_data) = &self.axis_data else {
+                    return;
+                };
+                axis_data.borrow_mut().flip = (flip_x, flip_y, flip_z);
             }
         }
     }
@@ -291,6 +312,21 @@ impl Perspective {
             .padding(20),
             row!(
                 button("Perform calculations").on_press(Message::CalculateAndSaveToFile),
+                button("Flip X").on_press(Message::Flip(
+                    !self.axis_data.as_ref().unwrap().borrow().flip.0,
+                    self.axis_data.as_ref().unwrap().borrow().flip.1,
+                    self.axis_data.as_ref().unwrap().borrow().flip.2,
+                )),
+                button("Flip Y").on_press(Message::Flip(
+                    self.axis_data.as_ref().unwrap().borrow().flip.0,
+                    !self.axis_data.as_ref().unwrap().borrow().flip.1,
+                    self.axis_data.as_ref().unwrap().borrow().flip.2,
+                )),
+                button("Flip Z").on_press(Message::Flip(
+                    self.axis_data.as_ref().unwrap().borrow().flip.0,
+                    self.axis_data.as_ref().unwrap().borrow().flip.1,
+                    !self.axis_data.as_ref().unwrap().borrow().flip.2,
+                )),
                 button("Draw lines").on_press(Message::Draw),
                 button("Save lines").on_press(Message::Save),
             )
@@ -308,7 +344,7 @@ impl Perspective {
 #[cfg(test)]
 mod tests {
     use anyhow::Result;
-    use nalgebra::Vector2;
+    use nalgebra::{Matrix3, RowVector3, Vector2};
     use perspective::compute::{compute_camera_pose, store_scene_data_to_file};
     use tracing::trace;
     use tracing_subscriber::EnvFilter;
@@ -342,10 +378,22 @@ mod tests {
             Vector2::new(0.666962, 0.5956681),
             Vector2::new(0.80341774, 0.49957806),
         ];
-        let compute_solution =
-            compute_camera_pose(&points, ratio, &user_selected_origin, &handle_position)
-                .await
-                .unwrap();
+
+        let axis = Matrix3::from_rows(&[
+            RowVector3::new(1.0, 0.0, 0.0),
+            RowVector3::new(0.0, -1.0, 0.0),
+            RowVector3::new(0.0, 0.0, -1.0),
+        ]);
+
+        let compute_solution = compute_camera_pose(
+            &points,
+            ratio,
+            &user_selected_origin,
+            &handle_position,
+            axis,
+        )
+        .await
+        .unwrap();
 
         trace!("out {:#?}", compute_solution.view_transform);
 

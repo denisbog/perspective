@@ -24,6 +24,7 @@ pub struct Lines {
     pub scale: StoreLine,
     pub lines: Vec<StoreLine>,
     pub points: Option<Vec<StorePoint3d>>,
+    pub flip: Option<[bool; 3]>,
 }
 #[derive(Serialize, Deserialize)]
 pub struct StoreLine {
@@ -89,12 +90,17 @@ pub fn read_points_from_file(points: &String) -> (AxisData, Option<Vec<Vector3<f
             .map(|point| Vector3::new(point.x, point.y, point.z))
             .collect()
     });
-
+    let flip = if let Some(flip) = data.flip {
+        (flip[0], flip[1], flip[2])
+    } else {
+        (false, false, false)
+    };
     (
         AxisData {
             control_point,
             scale,
             axis_lines: lines,
+            flip,
         },
         points,
     )
@@ -143,6 +149,7 @@ pub async fn compute_adapter(
     image_height: u32,
     control_point: &Point,
     scale: &(Point, Point),
+    flip: (bool, bool, bool),
 ) -> Result<ComputeSolution> {
     let points: [Vector2<f32>; 12] = [
         Vector2::new(x_lines[0].0.x, x_lines[0].0.y),
@@ -163,11 +170,21 @@ pub async fn compute_adapter(
         Vector2::new(scale.1.x, scale.1.y),
     ];
     let control_point: Vector2<f32> = Vector2::new(control_point.x, control_point.y);
+
+    let x = if flip.0 { 1.0 } else { -1.0 };
+    let y = if flip.1 { 1.0 } else { -1.0 };
+    let z = if flip.2 { 1.0 } else { -1.0 };
+    let axis = Matrix3::from_rows(&[
+        RowVector3::new(x, 0.0, 0.0),
+        RowVector3::new(0.0, y, 0.0),
+        RowVector3::new(0.0, 0.0, z),
+    ]);
     compute_camera_pose(
         &points,
         image_width as f32 / image_height as f32,
         &control_point,
         &scale,
+        axis,
     )
     .await
 }
@@ -177,6 +194,7 @@ pub async fn compute_camera_pose(
     ratio: f32,
     user_selected_origin: &Vector2<f32>,
     handle_position: &[Vector2<f32>; 2],
+    axis: Matrix3<f32>,
 ) -> Result<ComputeSolution> {
     let vanishing_points = points
         .chunks(4)
@@ -238,11 +256,6 @@ pub async fn compute_camera_pose(
     //let z_rotation = x_rotation.cross(&y_rotation);
     let rotation_matrix = Matrix3::from_columns(&[x_rotation, y_rotation, z_rotation]);
     trace!("rotation matrix: {rotation_matrix}");
-    let axis = Matrix3::from_rows(&[
-        RowVector3::new(1.0, 0.0, 0.0),
-        RowVector3::new(0.0, -1.0, 0.0),
-        RowVector3::new(0.0, 0.0, -1.0),
-    ]);
 
     let view_transform = rotation_matrix * axis;
     let view_transform = view_transform.to_homogeneous();

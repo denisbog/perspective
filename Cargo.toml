@@ -28,10 +28,13 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 zoomer = {path = "components/zoomer"}
 
 
-
-
 [workspace]
 members=["components/*"]
 
 [workspace.dependencies]
 iced = { git = "https://github.com/iced-rs/iced.git", branch = "latest", features = ["debug", "tokio", "canvas", "image", "advanced"] }
+
+
+#[profile.dev.package."*"]
+#inherits = "release"
+#opt-level = 3

@@ -80,6 +80,7 @@ pub struct AxisData {
     pub axis_lines: Vec<(Point, Point)>,
     pub control_point: Point,
     pub scale: (Point, Point),
+    pub flip: (bool, bool, bool),
 }
 
 impl Default for AxisData {
@@ -113,6 +114,7 @@ impl Default for AxisData {
                     Point::new(0.30770832, 0.05111111),
                 ),
             ],
+            flip: (false, false, false),
         }
     }
 }

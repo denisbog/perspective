@@ -160,8 +160,8 @@ pub fn draw_origin_with_axis<Renderer>(
     frame.stroke(
         &path,
         Stroke {
-            style: canvas::Style::Solid(Color::from_rgba(1.0, 1.0, 1.0, 0.2)),
-            width: 1.0,
+            style: canvas::Style::Solid(color_red),
+            width: 3.0,
             ..Stroke::default()
         },
     );
@@ -185,7 +185,7 @@ pub fn draw_origin_with_axis<Renderer>(
         &path,
         Stroke {
             style: canvas::Style::Solid(color_green),
-            width: 2.0,
+            width: 3.0,
             ..Stroke::default()
         },
     );
@@ -208,7 +208,7 @@ pub fn draw_origin_with_axis<Renderer>(
         &path,
         Stroke {
             style: canvas::Style::Solid(color_blue),
-            width: 2.0,
+            width: 3.0,
             ..Stroke::default()
         },
     );
