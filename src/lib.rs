@@ -7,6 +7,7 @@ pub mod encoder;
 pub mod fspy;
 pub mod utils;
 use iced::Point;
+use nalgebra::Vector3;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -81,6 +82,7 @@ pub struct AxisData {
     pub control_point: Point,
     pub scale: (Point, Point),
     pub flip: (bool, bool, bool),
+    pub custom_origin_tanslation: Option<Vector3<f32>>,
 }
 
 impl Default for AxisData {
@@ -115,6 +117,7 @@ impl Default for AxisData {
                 ),
             ],
             flip: (false, false, false),
+            custom_origin_tanslation: None,
         }
     }
 }

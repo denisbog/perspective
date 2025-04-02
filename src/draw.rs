@@ -39,6 +39,7 @@ where
     renderer_: PhantomData<Renderer>,
     theme_: PhantomData<Theme>,
     image_size: Size<f32>,
+    traslate_origin: Rc<RefCell<Vector3<f32>>>,
 }
 impl<'a, Message, Theme, Renderer> DrawLine<'a, Message, Theme, Renderer>
 where
@@ -48,6 +49,7 @@ where
     pub fn new(
         compute_solution: &'a Option<ComputeSolution>,
         draw_lines: Rc<RefCell<Vec<Vector3<f32>>>>,
+        traslate_origin: Rc<RefCell<Vector3<f32>>>,
     ) -> Self {
         DrawLine {
             width: Length::Fixed(Self::DEFAULT_SIZE),
@@ -60,6 +62,7 @@ where
             draw_cache: geometry::Cache::default(),
             draw_lines_cache: geometry::Cache::default(),
             draw_lines,
+            traslate_origin,
         }
     }
     pub fn width(mut self, width: impl Into<Length>) -> Self {
@@ -109,6 +112,11 @@ where
                 else {
                     return (Status::Ignored, None);
                 };
+
+                self.traslate_origin.borrow_mut().x = new_point_3d.x;
+                self.traslate_origin.borrow_mut().y = new_point_3d.y;
+                self.traslate_origin.borrow_mut().z = new_point_3d.z;
+
                 let last_point_3d = *self.draw_lines.borrow().last().unwrap();
                 let location3d = match state.edit_state {
                     Edit::EditX => Vector3::new(new_point_3d.x, last_point_3d.y, last_point_3d.z),

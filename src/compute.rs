@@ -25,6 +25,7 @@ pub struct Lines {
     pub lines: Vec<StoreLine>,
     pub points: Option<Vec<StorePoint3d>>,
     pub flip: Option<[bool; 3]>,
+    pub custom_origin_tanslation: Option<StorePoint3d>,
 }
 #[derive(Serialize, Deserialize)]
 pub struct StoreLine {
@@ -90,17 +91,31 @@ pub fn read_points_from_file(points: &String) -> (AxisData, Option<Vec<Vector3<f
             .map(|point| Vector3::new(point.x, point.y, point.z))
             .collect()
     });
+
     let flip = if let Some(flip) = data.flip {
         (flip[0], flip[1], flip[2])
     } else {
         (false, false, false)
     };
+
+    let custom_origin_tanslation =
+        if let Some(custom_origin_tanslation) = data.custom_origin_tanslation {
+            Some(Vector3::new(
+                custom_origin_tanslation.x,
+                custom_origin_tanslation.y,
+                custom_origin_tanslation.z,
+            ))
+        } else {
+            None
+        };
+
     (
         AxisData {
             control_point,
             scale,
             axis_lines: lines,
             flip,
+            custom_origin_tanslation,
         },
         points,
     )
@@ -150,6 +165,7 @@ pub async fn compute_adapter(
     control_point: &Point,
     scale: &(Point, Point),
     flip: (bool, bool, bool),
+    translate_origin: &Option<Vector3<f32>>,
 ) -> Result<ComputeSolution> {
     let points: [Vector2<f32>; 12] = [
         Vector2::new(x_lines[0].0.x, x_lines[0].0.y),
@@ -185,6 +201,7 @@ pub async fn compute_adapter(
         &control_point,
         &scale,
         axis,
+        &translate_origin,
     )
     .await
 }
@@ -195,6 +212,7 @@ pub async fn compute_camera_pose(
     user_selected_origin: &Vector2<f32>,
     handle_position: &[Vector2<f32>; 2],
     axis: Matrix3<f32>,
+    translate_origin: &Option<Vector3<f32>>,
 ) -> Result<ComputeSolution> {
     let vanishing_points = points
         .chunks(4)
@@ -329,7 +347,11 @@ pub async fn compute_camera_pose(
 
     let view_transform = view_transform.append_translation(&(origin3d / distance));
 
-    // let view_transform = view_transform * Matrix4::new_translation(&Vector3::new(1.0, 2.0, 0.0));
+    let view_transform = if let Some(translate_origin) = translate_origin {
+        view_transform * Matrix4::new_translation(&(Vector3::zeros() - translate_origin))
+    } else {
+        view_transform
+    };
     trace!("view transform: {view_transform}");
     // to ckeck in blender
     // bpy.data.objects["<name>.fspy"].matrix_world

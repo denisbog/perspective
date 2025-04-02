@@ -54,6 +54,8 @@ enum Message {
     },
     SelectImage(u8),
     Flip(bool, bool, bool),
+    AddTranslation,
+    ResetTranslation,
 }
 
 #[derive(Default)]
@@ -69,6 +71,7 @@ struct Perspective {
     draw_lines: Rc<RefCell<Vec<Vector3<f32>>>>,
     selected_image: u8,
     images: Vec<String>,
+    traslate_origin: Rc<RefCell<Vector3<f32>>>,
 }
 #[derive(Debug, Clone)]
 struct ImageData {
@@ -150,6 +153,18 @@ impl Perspective {
                     .iter()
                     .map(Into::into)
                     .collect::<Vec<StoreLine>>();
+
+                let custom_origin_tanslation =
+                    if let Some(item) = axis_data.borrow().custom_origin_tanslation {
+                        Some(StorePoint3d {
+                            x: item.x,
+                            y: item.y,
+                            z: item.z,
+                        })
+                    } else {
+                        None
+                    };
+
                 let store = Lines {
                     lines,
                     control_point: StorePoint {
@@ -173,6 +188,7 @@ impl Perspective {
                         axis_data.borrow().flip.1,
                         axis_data.borrow().flip.2,
                     ]),
+                    custom_origin_tanslation,
                 };
                 file.write_all(&serde_json::to_vec(&store).unwrap())
                     .unwrap();
@@ -206,6 +222,7 @@ impl Perspective {
                         control_point,
                         scale,
                         axis_data.borrow().flip,
+                        &axis_data.borrow().custom_origin_tanslation,
                     )
                     .await
                     .unwrap();
@@ -231,6 +248,7 @@ impl Perspective {
                 if let Some(image_data) = image_data {
                     self.axis_data = Some(Rc::new(RefCell::new(image_data.axis_data)));
                     if let Some(lines) = image_data.lines {
+                        self.traslate_origin = Rc::new(RefCell::new(lines.last().unwrap().clone()));
                         self.draw_lines = Rc::new(RefCell::new(lines));
                     }
                 } else {
@@ -247,12 +265,15 @@ impl Perspective {
                     .get(self.selected_image as usize)
                     .unwrap()
                     .clone();
-                let points_file_name = Path::new(&selected_image_name)
+                self.image_path = selected_image_name.clone();
+                let name_without_extension = Path::new(&selected_image_name)
                     .file_stem()
                     .unwrap()
                     .to_str()
                     .unwrap();
-                self.points_file_name = format!("{}.points", points_file_name);
+                self.points_file_name = format!("{}.points", name_without_extension);
+                self.export_file_name = format!("{}.fspy", name_without_extension);
+
                 self.update(extract_state(block_on(async {
                     load(selected_image_name, self.points_file_name.clone(), false).await
                 })));
@@ -264,6 +285,21 @@ impl Perspective {
                 };
                 axis_data.borrow_mut().flip = (flip_x, flip_y, flip_z);
             }
+            Message::AddTranslation => {
+                let Some(axis_data) = &self.axis_data else {
+                    return;
+                };
+                axis_data.borrow_mut().custom_origin_tanslation =
+                    Some(self.traslate_origin.borrow().clone());
+                self.update(Message::CalculateAndSaveToFile);
+            }
+            Message::ResetTranslation => {
+                let Some(axis_data) = &self.axis_data else {
+                    return;
+                };
+                axis_data.borrow_mut().custom_origin_tanslation = None;
+                self.update(Message::CalculateAndSaveToFile);
+            }
         }
     }
     fn view(&self) -> Element<Message> {
@@ -271,11 +307,15 @@ impl Perspective {
             return center(text("Loading...").width(Fill).align_x(Center).size(50)).into();
         };
         let component: Element<Message> = if self.draw {
-            DrawLine::new(&self.compute_solution, Rc::clone(&self.draw_lines))
-                .image_size(Size::new(self.image_width as f32, self.image_height as f32))
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .into()
+            DrawLine::new(
+                &self.compute_solution,
+                Rc::clone(&self.draw_lines),
+                self.traslate_origin.clone(),
+            )
+            .image_size(Size::new(self.image_width as f32, self.image_height as f32))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
         } else {
             ComputeCameraPose::new(
                 self.axis_data.as_ref().unwrap().clone(),
@@ -328,6 +368,8 @@ impl Perspective {
                     !self.axis_data.as_ref().unwrap().borrow().flip.2,
                 )),
                 button("Draw lines").on_press(Message::Draw),
+                button("Apply Translation").on_press(Message::AddTranslation),
+                button("Reset Translation").on_press(Message::ResetTranslation),
                 button("Save lines").on_press(Message::Save),
             )
             .width(Length::Fill)
@@ -391,6 +433,7 @@ mod tests {
             &user_selected_origin,
             &handle_position,
             axis,
+            &None,
         )
         .await
         .unwrap();
