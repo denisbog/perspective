@@ -243,20 +243,22 @@ pub async fn compute_camera_pose_scale(
     trace!("apply custom scale {}", original_tanslation);
     let original_translation = original_tanslation / 4.0 / 200.0;
     trace!("apply custom scale {}", original_translation);
-    // let distance = find_scale_to_apply(
-    //     compute_solution.focal_length,
-    //     original_tanslation,
-    //     compute_solution.ortho_center,
-    //     compute_solution.view_transform,
-    //     user_selected_origin,
-    //     scale_segment,
-    // );
-    //
-    //
+    let distance = find_scale_to_apply(
+        compute_solution.focal_length,
+        original_tanslation,
+        compute_solution.ortho_center,
+        compute_solution.view_transform,
+        user_selected_origin,
+        scale_segment,
+    );
+
     trace!("view {}", compute_solution.view_transform);
+    let mut original_translation = (original_translation / distance).to_homogeneous();
+    original_translation.w = 1.0;
+    trace!("apply custom scale {}", original_translation);
     compute_solution
         .view_transform
-        .append_translation_mut(&(original_translation / 1000.0));
+        .set_column(3, &original_translation);
     trace!("view {}", compute_solution.view_transform);
     Ok(compute_solution)
 }
@@ -393,22 +395,6 @@ fn find_scale_to_apply(
     let intersection1_3d = line_insert_with_yz_plane(&point3d[0], &point3d[1]);
     trace!("intersection3d: {intersection1_3d}");
     let intersection2_3d = intersection1_3d + Vector3::new(1.0, 0.0, 0.0);
-
-    let i1 = line_insert_with_plane(
-        &Vector3::new(0.0, 0.0, 0.0),
-        &Vector3::new(0.0, 0.0, 1.0),
-        &Vector3::new(0.0, 0.0, 0.0),
-        &Vector3::new(handle_position_a.x, handle_position_a.y, 1.0),
-    );
-    let i2 = line_insert_with_plane(
-        &Vector3::new(0.0, 0.0, 0.0),
-        &Vector3::new(0.0, 0.0, 1.0),
-        &Vector3::new(0.0, 0.0, 0.0),
-        &Vector3::new(handle_position_b.x, handle_position_b.y, 1.0),
-    );
-
-    trace!("i1 {}", i1);
-    trace!("i2 {}", i2);
 
     let distance = point3d[2..]
         .iter()
