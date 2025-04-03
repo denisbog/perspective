@@ -45,9 +45,16 @@ pub fn main() -> iced::Result {
         .run_with(Perspective::new)
 }
 
+#[derive(Default, Clone, Debug)]
+enum UiMod {
+    #[default]
+    Pose,
+    Draw,
+    Scale,
+}
+
 #[derive(Debug, Clone)]
 enum Message {
-    Draw,
     Save,
     CalculateAndSaveToFile,
     LoadApplicationState {
@@ -58,6 +65,7 @@ enum Message {
     Flip(bool, bool, bool),
     AddTranslation,
     ResetTranslation,
+    ChangeMode(UiMod),
 }
 
 #[derive(Default)]
@@ -69,11 +77,11 @@ struct Perspective {
     compute_solution: Option<ComputeSolution>,
     image_width: u32,
     image_height: u32,
-    draw: bool,
     draw_lines: Rc<RefCell<Vec<Vector3<f32>>>>,
     selected_image: u8,
     images: Vec<String>,
     traslate_origin: Rc<RefCell<Vector3<f32>>>,
+    mode: UiMod,
 }
 #[derive(Debug, Clone)]
 struct ImageData {
@@ -257,8 +265,8 @@ impl Perspective {
                     self.axis_data = Some(Rc::new(RefCell::new(AxisData::default())));
                 }
             }
-            Message::Draw => {
-                self.draw = !self.draw;
+            Message::ChangeMode(mode) => {
+                self.mode = mode;
             }
             Message::SelectImage(selected) => {
                 self.selected_image = selected;
@@ -308,7 +316,7 @@ impl Perspective {
         if self.axis_data.is_none() {
             return center(text("Loading...").width(Fill).align_x(Center).size(50)).into();
         };
-        let component: Element<Message> = if self.draw {
+        let component: Element<Message> = if let UiMod::Draw = self.mode {
             DrawLine::new(
                 &self.compute_solution,
                 Rc::clone(&self.draw_lines),
@@ -329,6 +337,68 @@ impl Perspective {
             .into()
         };
 
+        let mut buttons = Vec::new();
+        match self.mode {
+            UiMod::Draw => {
+                buttons.push(
+                    button("Pose")
+                        .on_press(Message::ChangeMode(UiMod::Pose))
+                        .into(),
+                );
+                buttons.push(
+                    button("Apply Translation")
+                        .on_press(Message::AddTranslation)
+                        .into(),
+                );
+                buttons.push(
+                    button("Reset Translation")
+                        .on_press(Message::ResetTranslation)
+                        .into(),
+                );
+                buttons.push(button("Save lines").on_press(Message::Save).into());
+            }
+            UiMod::Pose => {
+                buttons.push(
+                    button("Draw lines")
+                        .on_press(Message::ChangeMode(UiMod::Draw))
+                        .into(),
+                );
+                buttons.push(
+                    button("Perform calculations")
+                        .on_press(Message::CalculateAndSaveToFile)
+                        .into(),
+                );
+                buttons.push(
+                    button("Flip X")
+                        .on_press(Message::Flip(
+                            !self.axis_data.as_ref().unwrap().borrow().flip.0,
+                            self.axis_data.as_ref().unwrap().borrow().flip.1,
+                            self.axis_data.as_ref().unwrap().borrow().flip.2,
+                        ))
+                        .into(),
+                );
+                buttons.push(
+                    button("Flip Y")
+                        .on_press(Message::Flip(
+                            self.axis_data.as_ref().unwrap().borrow().flip.0,
+                            !self.axis_data.as_ref().unwrap().borrow().flip.1,
+                            self.axis_data.as_ref().unwrap().borrow().flip.2,
+                        ))
+                        .into(),
+                );
+                buttons.push(
+                    button("Flip Z")
+                        .on_press(Message::Flip(
+                            self.axis_data.as_ref().unwrap().borrow().flip.0,
+                            self.axis_data.as_ref().unwrap().borrow().flip.1,
+                            !self.axis_data.as_ref().unwrap().borrow().flip.2,
+                        ))
+                        .into(),
+                );
+            }
+            UiMod::Scale => todo!(),
+        }
+
         column!(
             row!(
                 column!(stack!(
@@ -344,12 +414,15 @@ impl Perspective {
                         Message::SelectImage
                     )
                     .width(280),
-                    iced::widget::Column::with_children(self.images.iter().map(|item| {
-                        image(item)
-                            .content_fit(iced::ContentFit::Cover)
-                            .width(280)
-                            .height(200)
-                            .into()
+                    column(self.images.iter().enumerate().map(|(index, item)| {
+                        button(
+                            image(item)
+                                .content_fit(iced::ContentFit::Cover)
+                                .width(280)
+                                .height(200),
+                        )
+                        .on_press_with(move || Message::SelectImage(index as u8))
+                        .into()
                     }))
                     .spacing(10)
                 )
@@ -359,31 +432,7 @@ impl Perspective {
             )
             .height(Length::Fill)
             .padding(20),
-            row!(
-                button("Perform calculations").on_press(Message::CalculateAndSaveToFile),
-                button("Flip X").on_press(Message::Flip(
-                    !self.axis_data.as_ref().unwrap().borrow().flip.0,
-                    self.axis_data.as_ref().unwrap().borrow().flip.1,
-                    self.axis_data.as_ref().unwrap().borrow().flip.2,
-                )),
-                button("Flip Y").on_press(Message::Flip(
-                    self.axis_data.as_ref().unwrap().borrow().flip.0,
-                    !self.axis_data.as_ref().unwrap().borrow().flip.1,
-                    self.axis_data.as_ref().unwrap().borrow().flip.2,
-                )),
-                button("Flip Z").on_press(Message::Flip(
-                    self.axis_data.as_ref().unwrap().borrow().flip.0,
-                    self.axis_data.as_ref().unwrap().borrow().flip.1,
-                    !self.axis_data.as_ref().unwrap().borrow().flip.2,
-                )),
-                button("Draw lines").on_press(Message::Draw),
-                button("Apply Translation").on_press(Message::AddTranslation),
-                button("Reset Translation").on_press(Message::ResetTranslation),
-                button("Save lines").on_press(Message::Save),
-            )
-            .width(Length::Fill)
-            .padding(10)
-            .spacing(5)
+            row(buttons).width(Length::Fill).padding(10).spacing(5)
         )
         .into()
     }

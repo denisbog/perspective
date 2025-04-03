@@ -199,7 +199,7 @@ pub async fn compute_adapter(
         &points,
         image_width as f32 / image_height as f32,
         &control_point,
-        &scale,
+        &Some(scale),
         axis,
         &translate_origin,
     )
@@ -210,7 +210,7 @@ pub async fn compute_camera_pose(
     points: &[Vector2<f32>; 12],
     ratio: f32,
     user_selected_origin: &Vector2<f32>,
-    handle_position: &[Vector2<f32>; 2],
+    scale_segment: &Option<[Vector2<f32>; 2]>,
     axis: Matrix3<f32>,
     translate_origin: &Option<Vector3<f32>>,
 ) -> Result<ComputeSolution> {
@@ -300,14 +300,50 @@ pub async fn compute_camera_pose(
     //trace!("model_view_projection: {model_view_projection}");
     //let unproject_matrix = model_view_projection.try_inverse().unwrap();
     //trace!("unproject_matrix: {unproject_matrix}");
+    let view_transform = if let Some(scale_segment) = scale_segment {
+        let distance = find_scale_to_apply(
+            ratio,
+            view_transform,
+            user_selected_origin,
+            matrix,
+            translation,
+            scale_segment,
+        );
+        view_transform.append_translation(&(origin3d / distance))
+    } else {
+        view_transform
+    };
 
-    let handle_position = handle_position
+    let view_transform = if let Some(translate_origin) = translate_origin {
+        view_transform * Matrix4::new_translation(&(Vector3::zeros() - translate_origin))
+    } else {
+        view_transform
+    };
+    trace!("view transform: {view_transform}");
+    // to ckeck in blender
+    // bpy.data.objects["<name>.fspy"].matrix_world
+    Ok(ComputeSolution::new(
+        view_transform,
+        ortho_center,
+        focal_length,
+    ))
+}
+
+fn find_scale_to_apply(
+    ratio: f32,
+    view_transform: Matrix4<f32>,
+    user_selected_origin: Vector2<f32>,
+    matrix: Matrix4<f32>,
+    translation: Matrix4<f32>,
+    scale_segment: &[Vector2<f32>; 2],
+) -> f32 {
+    let scale_segment_points = scale_segment
         .iter()
         .map(|point| relative_to_image_plane(ratio, point))
         .collect::<Vec<Vector2<f32>>>();
 
-    let handle_position_a = handle_position[0];
-    let handle_position_b = handle_position[1];
+    let handle_position_a = scale_segment_points[0];
+    let handle_position_b = scale_segment_points[1];
 
     let point3d = [
         Vector3::new(0.0, 0.0, 0.0),
@@ -344,22 +380,7 @@ pub async fn compute_camera_pose(
         .collect::<Vec<(Vector3<f32>, Vector3<f32>)>>();
     trace!("distance: {:#?}", distance);
     let distance = (distance[0].0 - distance[1].0).norm();
-
-    let view_transform = view_transform.append_translation(&(origin3d / distance));
-
-    let view_transform = if let Some(translate_origin) = translate_origin {
-        view_transform * Matrix4::new_translation(&(Vector3::zeros() - translate_origin))
-    } else {
-        view_transform
-    };
-    trace!("view transform: {view_transform}");
-    // to ckeck in blender
-    // bpy.data.objects["<name>.fspy"].matrix_world
-    Ok(ComputeSolution::new(
-        view_transform,
-        ortho_center,
-        focal_length,
-    ))
+    distance
 }
 
 pub fn find_vanishing_point_for_lines(
