@@ -18,7 +18,7 @@ use iced::Length::Fill;
 use iced::widget::{button, center, column, image, row, slider, stack, text};
 use iced::{Element, Length, Size, Task, Theme};
 use perspective::compute::{
-    ComputeSolution, Lines, StoreLine, StorePoint, StorePoint3d, compute_adapter,
+    ComputeSolution, Lines, StoreLine, StorePoint, StorePoint3d, compute_ui_adapter,
     read_points_from_file, store_scene_data_to_file,
 };
 use tracing::{trace, warn};
@@ -223,7 +223,7 @@ impl Perspective {
                 let control_point = &axis_data.borrow().control_point;
                 let scale = &axis_data.borrow().scale;
                 self.compute_solution = Some(block_on(async {
-                    let compute_solution = compute_adapter(
+                    let compute_solution = compute_ui_adapter(
                         lines_x,
                         lines_y,
                         lines_z,
@@ -445,8 +445,10 @@ impl Perspective {
 mod tests {
     use anyhow::Result;
     use nalgebra::{Matrix3, RowVector3, Vector2};
-    use perspective::compute::{compute_camera_pose, store_scene_data_to_file};
-    use tracing::trace;
+    use perspective::compute::{
+        compute_camera_pose, compute_camera_pose_scale, find_vanishing_point_for_lines,
+        relative_to_image_plane, store_scene_data_to_file,
+    };
     use tracing_subscriber::EnvFilter;
 
     #[tokio::test]
@@ -454,7 +456,7 @@ mod tests {
         tracing_subscriber::fmt()
             .with_env_filter(EnvFilter::from_default_env())
             .init();
-        let points = [
+        let points = vec![
             Vector2::new(0.6746836, 0.5918425),
             Vector2::new(0.8013924, 0.5004782),
             Vector2::new(0.50898737, 0.11926863),
@@ -474,7 +476,7 @@ mod tests {
 
         let user_selected_origin = Vector2::new(0.66607594, 0.5972433);
 
-        let handle_position = [
+        let handle_position = vec![
             Vector2::new(0.666962, 0.5956681),
             Vector2::new(0.80341774, 0.49957806),
         ];
@@ -485,18 +487,31 @@ mod tests {
             RowVector3::new(0.0, 0.0, -1.0),
         ]);
 
-        let compute_solution = compute_camera_pose(
-            &points,
-            ratio,
-            &user_selected_origin,
-            &Some(handle_position),
-            axis,
-            &None,
-        )
-        .await
-        .unwrap();
+        let user_selected_origin = relative_to_image_plane(ratio, &user_selected_origin);
 
-        trace!("out {:#?}", compute_solution.view_transform);
+        let vanishing_points = points
+            .chunks(4)
+            .map(|lines| find_vanishing_point_for_lines(&lines[0], &lines[1], &lines[2], &lines[3]))
+            .collect::<Vec<Vector2<f32>>>();
+
+        let vanishing_points = vanishing_points
+            .iter()
+            .map(|point| relative_to_image_plane(ratio, point))
+            .collect::<Vec<Vector2<f32>>>();
+
+        let scale_segment = handle_position
+            .iter()
+            .map(|point| relative_to_image_plane(ratio, point))
+            .collect::<Vec<Vector2<f32>>>();
+
+        let compute_solution = compute_camera_pose(&vanishing_points, &user_selected_origin, axis)
+            .await
+            .unwrap();
+
+        let compute_solution =
+            compute_camera_pose_scale(compute_solution, &user_selected_origin, &scale_segment)
+                .await
+                .unwrap();
 
         store_scene_data_to_file(
             &compute_solution,

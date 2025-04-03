@@ -156,7 +156,7 @@ pub async fn store_scene_data_to_file(
     repackage_file.write_all(&dst).await.unwrap();
     Ok(data)
 }
-pub async fn compute_adapter(
+pub async fn compute_ui_adapter(
     x_lines: [(Point, Point); 2],
     y_lines: [(Point, Point); 2],
     z_lines: [(Point, Point); 2],
