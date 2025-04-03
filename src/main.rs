@@ -1,4 +1,6 @@
+use ::image::ImageReader;
 use clap::{Parser, command};
+use iced::alignment::Horizontal;
 use iced::futures::executor::block_on;
 use nalgebra::Vector3;
 use perspective::AxisData;
@@ -13,7 +15,7 @@ use zoomer::ZoomViewer;
 
 use iced::Alignment::Center;
 use iced::Length::Fill;
-use iced::widget::{Image, button, center, column, row, slider, stack, text};
+use iced::widget::{button, center, column, image, row, slider, stack, text};
 use iced::{Element, Length, Size, Task, Theme};
 use perspective::compute::{
     ComputeSolution, Lines, StoreLine, StorePoint, StorePoint3d, compute_adapter,
@@ -95,7 +97,7 @@ async fn load(
         None
     };
 
-    let decoded_image = image::ImageReader::open(&image).unwrap().decode().unwrap();
+    let decoded_image = ImageReader::open(&image).unwrap().decode().unwrap();
     (
         extracted_data,
         Size::new(decoded_image.width(), decoded_image.height()),
@@ -341,12 +343,19 @@ impl Perspective {
                         self.selected_image,
                         Message::SelectImage
                     )
-                    .width(300),
-                    Image::new(self.images.get(self.selected_image as usize).unwrap())
-                        .content_fit(iced::ContentFit::Cover)
-                        .width(300)
-                        .height(200)
+                    .width(280),
+                    iced::widget::Column::with_children(self.images.iter().map(|item| {
+                        image(item)
+                            .content_fit(iced::ContentFit::Cover)
+                            .width(280)
+                            .height(200)
+                            .into()
+                    }))
+                    .spacing(10)
                 )
+                .width(300)
+                .spacing(10)
+                .align_x(Horizontal::Right),
             )
             .height(Length::Fill)
             .padding(20),
