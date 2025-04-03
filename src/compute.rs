@@ -195,25 +195,10 @@ pub async fn compute_adapter(
         RowVector3::new(0.0, y, 0.0),
         RowVector3::new(0.0, 0.0, z),
     ]);
-    compute_camera_pose(
-        &points,
-        image_width as f32 / image_height as f32,
-        &control_point,
-        &Some(scale),
-        axis,
-        &translate_origin,
-    )
-    .await
-}
 
-pub async fn compute_camera_pose(
-    points: &[Vector2<f32>; 12],
-    ratio: f32,
-    user_selected_origin: &Vector2<f32>,
-    scale_segment: &Option<[Vector2<f32>; 2]>,
-    axis: Matrix3<f32>,
-    translate_origin: &Option<Vector3<f32>>,
-) -> Result<ComputeSolution> {
+    let ratio = image_width as f32 / image_height as f32;
+    let user_selected_origin = relative_to_image_plane(ratio, &control_point);
+
     let vanishing_points = points
         .chunks(4)
         .map(|lines| find_vanishing_point_for_lines(&lines[0], &lines[1], &lines[2], &lines[3]))
@@ -225,6 +210,71 @@ pub async fn compute_camera_pose(
         .collect::<Vec<Vector2<f32>>>();
     trace!("vanishing point {:?}", vanishing_points);
 
+    let compute_solution =
+        compute_camera_pose(&vanishing_points, &user_selected_origin, axis).await;
+
+    let scale_segment = scale
+        .iter()
+        .map(|point| relative_to_image_plane(ratio, point))
+        .collect::<Vec<Vector2<f32>>>();
+
+    let compute_solution = if let Ok(compute_solution) = compute_solution {
+        compute_camera_pose_scale(compute_solution, &user_selected_origin, &scale_segment).await
+    } else {
+        compute_solution
+    };
+    if let Some(translate_origin) = translate_origin {
+        if let Ok(compute_solution) = compute_solution {
+            compute_camera_pose_translation(compute_solution, &translate_origin).await
+        } else {
+            compute_solution
+        }
+    } else {
+        compute_solution
+    }
+}
+
+pub async fn compute_camera_pose_scale(
+    mut compute_solution: ComputeSolution,
+    user_selected_origin: &Vector2<f32>,
+    scale_segment: &Vec<Vector2<f32>>,
+) -> Result<ComputeSolution> {
+    let original_tanslation = compute_solution.view_transform.column(3).xyz();
+    trace!("apply custom scale {}", original_tanslation);
+    let original_translation = original_tanslation / 4.0 / 200.0;
+    trace!("apply custom scale {}", original_translation);
+    // let distance = find_scale_to_apply(
+    //     compute_solution.focal_length,
+    //     original_tanslation,
+    //     compute_solution.ortho_center,
+    //     compute_solution.view_transform,
+    //     user_selected_origin,
+    //     scale_segment,
+    // );
+    //
+    //
+    trace!("view {}", compute_solution.view_transform);
+    compute_solution
+        .view_transform
+        .append_translation_mut(&(original_translation / 1000.0));
+    trace!("view {}", compute_solution.view_transform);
+    Ok(compute_solution)
+}
+
+pub async fn compute_camera_pose_translation(
+    mut compute_solution: ComputeSolution,
+    translate_origin: &Vector3<f32>,
+) -> Result<ComputeSolution> {
+    compute_solution
+        .view_transform
+        .append_translation_mut(&(Vector3::zeros() - translate_origin));
+    Ok(compute_solution)
+}
+pub async fn compute_camera_pose(
+    vanishing_points: &Vec<Vector2<f32>>,
+    user_selected_origin: &Vector2<f32>,
+    axis: Matrix3<f32>,
+) -> Result<ComputeSolution> {
     let ortho_center = triangle_ortho_center(
         &vanishing_points[0],
         &vanishing_points[1],
@@ -273,49 +323,22 @@ pub async fn compute_camera_pose(
     let z_rotation = Vector3::new(z_rotation.x, z_rotation.y, -focal_length).normalize();
     //let z_rotation = x_rotation.cross(&y_rotation);
     let rotation_matrix = Matrix3::from_columns(&[x_rotation, y_rotation, z_rotation]);
-    trace!("rotation matrix: {rotation_matrix}");
 
     let view_transform = rotation_matrix * axis;
-    let view_transform = view_transform.to_homogeneous();
-    trace!("view transform: {view_transform}");
-
-    let user_selected_origin = relative_to_image_plane(ratio, user_selected_origin);
+    let mut view_transform = view_transform.to_homogeneous();
 
     let mut origin3d: Vector3<f32> = (user_selected_origin - ortho_center).to_homogeneous();
     origin3d.z = -focal_length;
     origin3d /= focal_length;
     // apply default scale
     origin3d *= 10.0;
-    trace!("origin3d: {origin3d}");
+    view_transform.append_translation_mut(&origin3d);
 
     //let model_view_projection = matrix * translation * view_transform;
     //trace!("model_view_projection: {model_view_projection}");
     //let unproject_matrix = model_view_projection.try_inverse().unwrap();
     //trace!("unproject_matrix: {unproject_matrix}");
-    let view_transform = if let Some(scale_segment) = scale_segment {
-        let scale_segment_points = scale_segment
-            .iter()
-            .map(|point| relative_to_image_plane(ratio, point))
-            .collect::<Vec<Vector2<f32>>>();
-        let distance = find_scale_to_apply(
-            focal_length,
-            origin3d,
-            ortho_center,
-            view_transform,
-            user_selected_origin,
-            scale_segment_points,
-        );
-        view_transform.append_translation(&(origin3d / distance))
-    } else {
-        view_transform
-    };
 
-    let view_transform = if let Some(translate_origin) = translate_origin {
-        view_transform * Matrix4::new_translation(&(Vector3::zeros() - translate_origin))
-    } else {
-        view_transform
-    };
-    trace!("view transform: {view_transform}");
     // to ckeck in blender
     // bpy.data.objects["<name>.fspy"].matrix_world
     Ok(ComputeSolution::new(
@@ -330,8 +353,8 @@ fn find_scale_to_apply(
     origin3d: Vector3<f32>,
     ortho_center: Vector2<f32>,
     view_transform: Matrix4<f32>,
-    user_selected_origin: Vector2<f32>,
-    scale_segment_points: Vec<Vector2<f32>>,
+    user_selected_origin: &Vector2<f32>,
+    scale_segment_points: &Vec<Vector2<f32>>,
 ) -> f32 {
     let handle_position_a = scale_segment_points[0];
     let handle_position_b = scale_segment_points[1];
@@ -349,12 +372,13 @@ fn find_scale_to_apply(
     *matrix.index_mut((0, 2)) = -ortho_center.x;
     *matrix.index_mut((1, 2)) = -ortho_center.y;
     trace!("matrix: {matrix}");
-    let translation = Matrix4::new_translation(&origin3d);
+
+    //  let translation = Matrix4::new_translation(&origin3d);
     let point3d = point3d
         .iter()
         .map(|&point| {
             let temp = view_transform.try_inverse().unwrap()
-                * translation.try_inverse().unwrap()
+    //            * translation.try_inverse().unwrap()
                 * matrix.try_inverse().unwrap()
                 * Point3::from(point).to_homogeneous();
             Point3::from_homogeneous(temp).unwrap().coords
@@ -369,6 +393,22 @@ fn find_scale_to_apply(
     let intersection1_3d = line_insert_with_yz_plane(&point3d[0], &point3d[1]);
     trace!("intersection3d: {intersection1_3d}");
     let intersection2_3d = intersection1_3d + Vector3::new(1.0, 0.0, 0.0);
+
+    let i1 = line_insert_with_plane(
+        &Vector3::new(0.0, 0.0, 0.0),
+        &Vector3::new(0.0, 0.0, 1.0),
+        &Vector3::new(0.0, 0.0, 0.0),
+        &Vector3::new(handle_position_a.x, handle_position_a.y, 1.0),
+    );
+    let i2 = line_insert_with_plane(
+        &Vector3::new(0.0, 0.0, 0.0),
+        &Vector3::new(0.0, 0.0, 1.0),
+        &Vector3::new(0.0, 0.0, 0.0),
+        &Vector3::new(handle_position_b.x, handle_position_b.y, 1.0),
+    );
+
+    trace!("i1 {}", i1);
+    trace!("i2 {}", i2);
 
     let distance = point3d[2..]
         .iter()
