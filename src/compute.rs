@@ -259,10 +259,10 @@ pub async fn compute_camera_pose(
     //trace!("optimized focal length: {:?}", solution);
     //let focal_length = solution.position()[0];
 
-    let focal_length = ((vanishing_points[0] - ortho_center)
-        .dot(&(ortho_center - vanishing_points[1])))
-    .abs()
-    .sqrt();
+    let focal_length = (ortho_center - vanishing_points[0])
+        .dot(&(ortho_center - vanishing_points[1]))
+        .abs()
+        .sqrt();
     trace!("focal length: {focal_length}");
 
     let x_rotation = vanishing_points[0] - ortho_center;
@@ -288,26 +288,22 @@ pub async fn compute_camera_pose(
     origin3d *= 10.0;
     trace!("origin3d: {origin3d}");
 
-    let projection = Perspective3::new(1.0, 2.0 * (1.0 / focal_length).atan(), 0.01, 10.0);
-    trace!("projection: {:#?}", projection);
-    let mut matrix = projection.into_inner();
-    *matrix.index_mut((0, 2)) = -ortho_center.x;
-    *matrix.index_mut((1, 2)) = -ortho_center.y;
-    trace!("matrix: {matrix}");
-
-    let translation = Matrix4::new_translation(&origin3d);
     //let model_view_projection = matrix * translation * view_transform;
     //trace!("model_view_projection: {model_view_projection}");
     //let unproject_matrix = model_view_projection.try_inverse().unwrap();
     //trace!("unproject_matrix: {unproject_matrix}");
     let view_transform = if let Some(scale_segment) = scale_segment {
+        let scale_segment_points = scale_segment
+            .iter()
+            .map(|point| relative_to_image_plane(ratio, point))
+            .collect::<Vec<Vector2<f32>>>();
         let distance = find_scale_to_apply(
-            ratio,
+            focal_length,
+            origin3d,
+            ortho_center,
             view_transform,
             user_selected_origin,
-            matrix,
-            translation,
-            scale_segment,
+            scale_segment_points,
         );
         view_transform.append_translation(&(origin3d / distance))
     } else {
@@ -330,18 +326,13 @@ pub async fn compute_camera_pose(
 }
 
 fn find_scale_to_apply(
-    ratio: f32,
+    focal_length: f32,
+    origin3d: Vector3<f32>,
+    ortho_center: Vector2<f32>,
     view_transform: Matrix4<f32>,
     user_selected_origin: Vector2<f32>,
-    matrix: Matrix4<f32>,
-    translation: Matrix4<f32>,
-    scale_segment: &[Vector2<f32>; 2],
+    scale_segment_points: Vec<Vector2<f32>>,
 ) -> f32 {
-    let scale_segment_points = scale_segment
-        .iter()
-        .map(|point| relative_to_image_plane(ratio, point))
-        .collect::<Vec<Vector2<f32>>>();
-
     let handle_position_a = scale_segment_points[0];
     let handle_position_b = scale_segment_points[1];
 
@@ -352,6 +343,13 @@ fn find_scale_to_apply(
         Vector3::new(handle_position_b.x, handle_position_b.y, 1.0),
     ];
 
+    let projection = Perspective3::new(1.0, 2.0 * (1.0 / focal_length).atan(), 0.01, 10.0);
+    trace!("projection: {:#?}", projection);
+    let mut matrix = projection.into_inner();
+    *matrix.index_mut((0, 2)) = -ortho_center.x;
+    *matrix.index_mut((1, 2)) = -ortho_center.y;
+    trace!("matrix: {matrix}");
+    let translation = Matrix4::new_translation(&origin3d);
     let point3d = point3d
         .iter()
         .map(|&point| {

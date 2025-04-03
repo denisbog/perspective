@@ -1,4 +1,14 @@
-# todo
+# Notes
+
+## implemetation
+
+starting point for the implementation `https://github.com/stuffmatic/fSpy-Blender`
+
+## documentation
+
+- `https://annals-csis.org/proceedings/2012/pliks/110.pdf`
+
+## todo
 
 allow the user to view the zoomed region of the image under cursor
 to allow the user more pricese control when editing control lines

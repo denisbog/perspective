@@ -489,7 +489,7 @@ mod tests {
             &points,
             ratio,
             &user_selected_origin,
-            &handle_position,
+            &Some(handle_position),
             axis,
             &None,
         )
