@@ -239,11 +239,8 @@ pub async fn compute_camera_pose_scale(
     user_selected_origin: &Vector2<f32>,
     scale_segment: &Vec<Vector2<f32>>,
 ) -> Result<ComputeSolution> {
-    let original_translation = compute_solution.view_transform.column(3).xyz();
-    trace!("apply custom scale {}", original_translation);
     let distance = find_scale_to_apply(
         compute_solution.focal_length,
-        original_translation,
         compute_solution.ortho_center,
         compute_solution.view_transform,
         user_selected_origin,
@@ -342,7 +339,6 @@ pub async fn compute_camera_pose(
 
 fn find_scale_to_apply(
     focal_length: f32,
-    origin3d: Vector3<f32>,
     ortho_center: Vector2<f32>,
     view_transform: Matrix4<f32>,
     user_selected_origin: &Vector2<f32>,
