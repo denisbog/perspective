@@ -239,27 +239,18 @@ pub async fn compute_camera_pose_scale(
     user_selected_origin: &Vector2<f32>,
     scale_segment: &Vec<Vector2<f32>>,
 ) -> Result<ComputeSolution> {
-    let original_tanslation = compute_solution.view_transform.column(3).xyz();
-    trace!("apply custom scale {}", original_tanslation);
-    let original_translation = original_tanslation / 4.0 / 200.0;
+    let original_translation = compute_solution.view_transform.column(3).xyz();
     trace!("apply custom scale {}", original_translation);
     let distance = find_scale_to_apply(
         compute_solution.focal_length,
-        original_tanslation,
+        original_translation,
         compute_solution.ortho_center,
         compute_solution.view_transform,
         user_selected_origin,
         scale_segment,
     );
-
-    trace!("view {}", compute_solution.view_transform);
-    let mut original_translation = (original_translation / distance).to_homogeneous();
-    original_translation.w = 1.0;
-    trace!("apply custom scale {}", original_translation);
-    compute_solution
-        .view_transform
-        .set_column(3, &original_translation);
-    trace!("view {}", compute_solution.view_transform);
+    compute_solution.view_transform =
+        compute_solution.view_transform * Matrix4::new_scaling(distance);
     Ok(compute_solution)
 }
 
@@ -267,9 +258,8 @@ pub async fn compute_camera_pose_translation(
     mut compute_solution: ComputeSolution,
     translate_origin: &Vector3<f32>,
 ) -> Result<ComputeSolution> {
-    compute_solution
-        .view_transform
-        .append_translation_mut(&(Vector3::zeros() - translate_origin));
+    compute_solution.view_transform = compute_solution.view_transform
+        * Matrix4::new_translation(&(Vector3::zeros() - translate_origin));
     Ok(compute_solution)
 }
 pub async fn compute_camera_pose(
