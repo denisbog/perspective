@@ -6,6 +6,7 @@ use nalgebra::Vector3;
 use perspective::AxisData;
 use perspective::camera_pose::ComputeCameraPose;
 use perspective::draw::DrawLine;
+use perspective::scale::Scale;
 use std::cell::RefCell;
 use std::fs::File;
 use std::io::Write;
@@ -19,7 +20,7 @@ use iced::widget::{button, center, column, image, row, slider, stack, text};
 use iced::{Element, Length, Size, Task, Theme};
 use perspective::compute::{
     ComputeSolution, Lines, StoreLine, StorePoint, StorePoint3d, compute_ui_adapter,
-    read_points_from_file, store_scene_data_to_file,
+    compute_ui_adapter_scale, read_points_from_file, store_scene_data_to_file,
 };
 use tracing::{trace, warn};
 use tracing_subscriber::EnvFilter;
@@ -56,16 +57,18 @@ enum UiMod {
 #[derive(Debug, Clone)]
 enum Message {
     Save,
-    CalculateAndSaveToFile,
+    Calculate,
     LoadApplicationState {
         image_data: Option<ImageData>,
         image_size: Size<u32>,
     },
     SelectImage(u8),
     Flip(bool, bool, bool),
+    ApplyScale,
     AddTranslation,
     ResetTranslation,
     ChangeMode(UiMod),
+    SavePoseToFile,
 }
 
 #[derive(Default)]
@@ -75,12 +78,12 @@ struct Perspective {
     points_file_name: String,
     export_file_name: String,
     compute_solution: Option<ComputeSolution>,
-    image_width: u32,
-    image_height: u32,
+    image_size: Size<f32>,
     draw_lines: Rc<RefCell<Vec<Vector3<f32>>>>,
     selected_image: u8,
     images: Vec<String>,
     traslate_origin: Rc<RefCell<Vector3<f32>>>,
+    scale: Rc<RefCell<Vector3<f32>>>,
     mode: UiMod,
 }
 #[derive(Debug, Clone)]
@@ -203,7 +206,7 @@ impl Perspective {
                 file.write_all(&serde_json::to_vec(&store).unwrap())
                     .unwrap();
             }
-            Message::CalculateAndSaveToFile => {
+            Message::Calculate => {
                 let Some(axis_data) = &self.axis_data else {
                     return;
                 };
@@ -227,8 +230,7 @@ impl Perspective {
                         lines_x,
                         lines_y,
                         lines_z,
-                        self.image_width,
-                        self.image_height,
+                        self.image_size,
                         control_point,
                         scale,
                         axis_data.borrow().flip,
@@ -239,8 +241,8 @@ impl Perspective {
 
                     let data = store_scene_data_to_file(
                         &compute_solution,
-                        self.image_width,
-                        self.image_height,
+                        self.image_size.width as u32,
+                        self.image_size.height as u32,
                         self.image_path.clone(),
                         self.export_file_name.clone(),
                     )
@@ -253,8 +255,7 @@ impl Perspective {
                 image_data,
                 image_size,
             } => {
-                self.image_width = image_size.width;
-                self.image_height = image_size.height;
+                self.image_size = Size::new(image_size.width as f32, image_size.height as f32);
                 if let Some(image_data) = image_data {
                     self.axis_data = Some(Rc::new(RefCell::new(image_data.axis_data)));
                     if let Some(lines) = image_data.lines {
@@ -287,7 +288,8 @@ impl Perspective {
                 self.update(extract_state(block_on(async {
                     load(selected_image_name, self.points_file_name.clone(), false).await
                 })));
-                self.update(Message::CalculateAndSaveToFile);
+                self.update(Message::Calculate);
+                self.update(Message::SavePoseToFile);
             }
             Message::Flip(flip_x, flip_y, flip_z) => {
                 let Some(axis_data) = &self.axis_data else {
@@ -301,14 +303,53 @@ impl Perspective {
                 };
                 axis_data.borrow_mut().custom_origin_tanslation =
                     Some(self.traslate_origin.borrow().clone());
-                self.update(Message::CalculateAndSaveToFile);
+                self.update(Message::Calculate);
+                self.update(Message::SavePoseToFile);
             }
             Message::ResetTranslation => {
                 let Some(axis_data) = &self.axis_data else {
                     return;
                 };
                 axis_data.borrow_mut().custom_origin_tanslation = None;
-                self.update(Message::CalculateAndSaveToFile);
+                self.update(Message::Calculate);
+                self.update(Message::SavePoseToFile);
+            }
+            Message::ApplyScale => {
+                let Some(axis_data) = &self.axis_data else {
+                    return;
+                };
+
+                let Some(compute_solution) = self.compute_solution.clone() else {
+                    return;
+                };
+
+                let scale = &self.scale.borrow();
+                self.compute_solution = Some(block_on(async {
+                    let compute_solution = compute_ui_adapter_scale(
+                        scale,
+                        &axis_data.borrow().custom_origin_tanslation,
+                        compute_solution,
+                    )
+                    .await
+                    .unwrap();
+                    compute_solution
+                }));
+            }
+            Message::SavePoseToFile => {
+                let Some(compute_solution) = &self.compute_solution else {
+                    return;
+                };
+                Some(block_on(async {
+                    let data = store_scene_data_to_file(
+                        compute_solution,
+                        self.image_size.width as u32,
+                        self.image_size.height as u32,
+                        self.image_path.clone(),
+                        self.export_file_name.clone(),
+                    )
+                    .await;
+                    trace!("scene data: {:?}", data);
+                }));
             }
         }
     }
@@ -316,56 +357,46 @@ impl Perspective {
         if self.axis_data.is_none() {
             return center(text("Loading...").width(Fill).align_x(Center).size(50)).into();
         };
-        let component: Element<Message> = if let UiMod::Draw = self.mode {
-            DrawLine::new(
-                &self.compute_solution,
-                Rc::clone(&self.draw_lines),
-                self.traslate_origin.clone(),
-            )
-            .image_size(Size::new(self.image_width as f32, self.image_height as f32))
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into()
-        } else {
-            ComputeCameraPose::new(
+        let component: Element<Message> = match self.mode {
+            UiMod::Pose => ComputeCameraPose::new(
                 self.axis_data.as_ref().unwrap().clone(),
                 &self.compute_solution,
             )
-            .image_size(Size::new(self.image_width as f32, self.image_height as f32))
+            .image_size(self.image_size)
             .width(Length::Fill)
             .height(Length::Fill)
-            .into()
+            .into(),
+            UiMod::Draw => DrawLine::new(
+                &self.compute_solution,
+                Rc::clone(&self.draw_lines),
+                Rc::clone(&self.traslate_origin),
+            )
+            .image_size(self.image_size)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into(),
+            UiMod::Scale => Scale::new(
+                &self.compute_solution,
+                Rc::clone(&self.draw_lines),
+                Rc::clone(&self.traslate_origin),
+                Rc::clone(&self.scale),
+            )
+            .image_size(self.image_size)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into(),
         };
-
         let mut buttons = Vec::new();
         match self.mode {
-            UiMod::Draw => {
-                buttons.push(
-                    button("Pose")
-                        .on_press(Message::ChangeMode(UiMod::Pose))
-                        .into(),
-                );
-                buttons.push(
-                    button("Apply Translation")
-                        .on_press(Message::AddTranslation)
-                        .into(),
-                );
-                buttons.push(
-                    button("Reset Translation")
-                        .on_press(Message::ResetTranslation)
-                        .into(),
-                );
-                buttons.push(button("Save lines").on_press(Message::Save).into());
-            }
             UiMod::Pose => {
                 buttons.push(
-                    button("Draw lines")
-                        .on_press(Message::ChangeMode(UiMod::Draw))
+                    button("Scale/Translation")
+                        .on_press(Message::ChangeMode(UiMod::Scale))
                         .into(),
                 );
                 buttons.push(
                     button("Perform calculations")
-                        .on_press(Message::CalculateAndSaveToFile)
+                        .on_press(Message::Calculate)
                         .into(),
                 );
                 buttons.push(
@@ -395,8 +426,48 @@ impl Perspective {
                         ))
                         .into(),
                 );
+                buttons.push(
+                    button("Save Pose To File")
+                        .on_press(Message::SavePoseToFile)
+                        .into(),
+                );
             }
-            UiMod::Scale => todo!(),
+            UiMod::Scale => {
+                buttons.push(
+                    button("Pose")
+                        .on_press(Message::ChangeMode(UiMod::Pose))
+                        .into(),
+                );
+                buttons.push(
+                    button("Draw lines")
+                        .on_press(Message::ChangeMode(UiMod::Draw))
+                        .into(),
+                );
+                buttons.push(button("Apply Scale").on_press(Message::ApplyScale).into());
+                buttons.push(
+                    button("Apply Translation")
+                        .on_press(Message::AddTranslation)
+                        .into(),
+                );
+                buttons.push(
+                    button("Reset Translation")
+                        .on_press(Message::ResetTranslation)
+                        .into(),
+                );
+            }
+            UiMod::Draw => {
+                buttons.push(
+                    button("Pose")
+                        .on_press(Message::ChangeMode(UiMod::Pose))
+                        .into(),
+                );
+                buttons.push(
+                    button("Scale/Translation")
+                        .on_press(Message::ChangeMode(UiMod::Scale))
+                        .into(),
+                );
+                buttons.push(button("Save lines").on_press(Message::Save).into());
+            }
         }
 
         column!(

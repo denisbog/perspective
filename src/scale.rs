@@ -23,7 +23,7 @@ use crate::{
     compute::{ComputeSolution, line_insert_with_plane, relative_to_image_plane},
 };
 
-pub struct DrawLine<'a, Message, Theme = iced::Theme, Renderer = iced::Renderer>
+pub struct Scale<'a, Message, Theme = iced::Theme, Renderer = iced::Renderer>
 where
     Renderer: geometry::Renderer,
 {
@@ -40,8 +40,9 @@ where
     theme_: PhantomData<Theme>,
     image_size: Size<f32>,
     traslate_origin: Rc<RefCell<Vector3<f32>>>,
+    scale: Rc<RefCell<Vector3<f32>>>,
 }
-impl<'a, Message, Theme, Renderer> DrawLine<'a, Message, Theme, Renderer>
+impl<'a, Message, Theme, Renderer> Scale<'a, Message, Theme, Renderer>
 where
     Renderer: geometry::Renderer,
 {
@@ -50,6 +51,7 @@ where
         compute_solution: &'a Option<ComputeSolution>,
         draw_lines: Rc<RefCell<Vec<Vector3<f32>>>>,
         traslate_origin: Rc<RefCell<Vector3<f32>>>,
+        scale: Rc<RefCell<Vector3<f32>>>,
     ) -> Self {
         Self {
             width: Length::Fixed(Self::DEFAULT_SIZE),
@@ -63,6 +65,7 @@ where
             draw_lines_cache: geometry::Cache::default(),
             draw_lines,
             traslate_origin,
+            scale,
         }
     }
     pub fn width(mut self, width: impl Into<Length>) -> Self {
@@ -95,8 +98,6 @@ where
         match event {
             Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Right)) => {
                 if self.draw_lines.borrow().len() > 1 {
-                    self.draw_lines.borrow_mut().pop();
-                    self.draw_lines_cache.clear();
                     self.draw_cache.clear();
                 }
                 state.draw = false;
@@ -113,19 +114,18 @@ where
                     return (Status::Ignored, None);
                 };
 
-                self.traslate_origin.borrow_mut().x = new_point_3d.x;
-                self.traslate_origin.borrow_mut().y = new_point_3d.y;
-                self.traslate_origin.borrow_mut().z = new_point_3d.z;
-
-                let last_point_3d = *self.draw_lines.borrow().last().unwrap();
+                let last_point_3d = Vector3::zeros();
                 let location3d = match state.edit_state {
                     Edit::EditX => Vector3::new(new_point_3d.x, last_point_3d.y, last_point_3d.z),
                     Edit::EditY => Vector3::new(last_point_3d.x, new_point_3d.y, last_point_3d.z),
                     Edit::EditZ => Vector3::new(last_point_3d.x, last_point_3d.y, new_point_3d.z),
                     _ => new_point_3d,
                 };
-                self.draw_lines.borrow_mut().push(location3d);
-                self.draw_lines_cache.clear();
+
+                self.scale.borrow_mut().x = location3d.x;
+                self.scale.borrow_mut().y = location3d.y;
+                self.scale.borrow_mut().z = location3d.z;
+
                 self.draw_cache.clear();
                 state.draw = false;
                 (Status::Ignored, None)
@@ -203,9 +203,6 @@ where
             });
 
         let draw_cache = self.draw_cache.draw(renderer, bounds.size(), |frame| {
-            if !state.draw {
-                return;
-            }
             let Some(cursor) = cursor.position() else {
                 return;
             };
@@ -215,7 +212,14 @@ where
             else {
                 return;
             };
-            let last_point_3d = &self.draw_lines.borrow().last().unwrap().clone();
+
+            let new_point_3d = if state.draw {
+                new_point_3d
+            } else {
+                self.scale.borrow().clone()
+            };
+
+            let last_point_3d = &Vector3::zeros();
             let location3d = match state.edit_state {
                 Edit::EditX => Vector3::new(new_point_3d.x, last_point_3d.y, last_point_3d.z),
                 Edit::EditY => Vector3::new(last_point_3d.x, new_point_3d.y, last_point_3d.z),
@@ -240,8 +244,8 @@ where
                     "{:>5.2},\n{:>5.2},\n{:>5.2}",
                     location3d.x, location3d.y, location3d.z
                 ),
-                position: Point::new(cursor.x + 8.0, cursor.y + 8.0),
-                color: Color::from_rgba(0.8, 0.8, 0.8, 0.8),
+                position: Point::new(new_point.x + 8.0, new_point.y + 8.0),
+                color: Color::from_rgba(0.8, 0.8, 0.2, 0.8),
                 size: Pixels(12.0),
                 ..Default::default()
             });
@@ -252,7 +256,7 @@ where
             frame.stroke(
                 &path,
                 Stroke {
-                    style: canvas::Style::Solid(Color::from_rgba(0.8, 0.8, 0.8, 0.8)),
+                    style: canvas::Style::Solid(Color::from_rgba(0.8, 0.8, 0.2, 0.8)),
                     width: 1.5,
                     ..Stroke::default()
                 },
@@ -332,7 +336,7 @@ where
 }
 
 impl<'a, Message, Theme, Renderer> Widget<Message, Theme, Renderer>
-    for DrawLine<'a, Message, Theme, Renderer>
+    for Scale<'a, Message, Theme, Renderer>
 where
     Renderer: geometry::Renderer,
 {
@@ -455,7 +459,7 @@ pub struct State {
     pub draw: bool,
 }
 
-impl<'a, Message, Theme, Renderer> From<DrawLine<'a, Message, Theme, Renderer>>
+impl<'a, Message, Theme, Renderer> From<Scale<'a, Message, Theme, Renderer>>
     for Element<'a, Message, Theme, Renderer>
 where
     Message: 'a,
@@ -463,7 +467,7 @@ where
     Renderer: 'a + geometry::Renderer,
 {
     fn from(
-        axis_decoration: DrawLine<'a, Message, Theme, Renderer>,
+        axis_decoration: Scale<'a, Message, Theme, Renderer>,
     ) -> Element<'a, Message, Theme, Renderer> {
         Element::new(axis_decoration)
     }

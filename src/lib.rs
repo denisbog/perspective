@@ -5,6 +5,7 @@ pub mod draw;
 pub mod draw_decoration;
 pub mod encoder;
 pub mod fspy;
+pub mod scale;
 pub mod utils;
 use iced::Point;
 use nalgebra::Vector3;

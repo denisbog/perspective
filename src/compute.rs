@@ -1,7 +1,7 @@
 use std::{fs::File, io::Read};
 
 use anyhow::Result;
-use iced::Point;
+use iced::{Point, Size};
 use nalgebra::{Matrix3, Matrix4, Perspective3, Point2, Point3, RowVector3, Vector2, Vector3};
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -160,8 +160,7 @@ pub async fn compute_ui_adapter(
     x_lines: [(Point, Point); 2],
     y_lines: [(Point, Point); 2],
     z_lines: [(Point, Point); 2],
-    image_width: u32,
-    image_height: u32,
+    image_size: Size<f32>,
     control_point: &Point,
     scale: &(Point, Point),
     flip: (bool, bool, bool),
@@ -196,7 +195,7 @@ pub async fn compute_ui_adapter(
         RowVector3::new(0.0, 0.0, z),
     ]);
 
-    let ratio = image_width as f32 / image_height as f32;
+    let ratio = image_size.width / image_size.height;
     let user_selected_origin = relative_to_image_plane(ratio, &control_point);
 
     let vanishing_points = points
@@ -234,6 +233,32 @@ pub async fn compute_ui_adapter(
     }
 }
 
+pub async fn compute_ui_adapter_scale(
+    scale: &Vector3<f32>,
+    translate_origin: &Option<Vector3<f32>>,
+    compute_solution: ComputeSolution,
+) -> Result<ComputeSolution> {
+    let compute_solution = compute_camera_pose_scale_new(compute_solution, &scale).await;
+    if let Some(translate_origin) = translate_origin {
+        if let Ok(compute_solution) = compute_solution {
+            compute_camera_pose_translation(compute_solution, &translate_origin).await
+        } else {
+            compute_solution
+        }
+    } else {
+        compute_solution
+    }
+}
+
+pub async fn compute_camera_pose_scale_new(
+    mut compute_solution: ComputeSolution,
+    scale_segment: &Vector3<f32>,
+) -> Result<ComputeSolution> {
+    let distance = scale_segment.norm();
+    compute_solution.view_transform =
+        compute_solution.view_transform * Matrix4::new_scaling(distance);
+    Ok(compute_solution)
+}
 pub async fn compute_camera_pose_scale(
     mut compute_solution: ComputeSolution,
     user_selected_origin: &Vector2<f32>,
@@ -503,7 +528,7 @@ pub fn find_distrance_between_lines(
 
     (pa, pb)
 }
-
+#[derive(Clone)]
 pub struct ComputeSolution {
     pub view_transform: Matrix4<f32>,
     pub ortho_center: Vector2<f32>,
