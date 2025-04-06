@@ -367,6 +367,7 @@ pub fn line_insert_with_xy_plane(
     let axis = Vector3::new(0.0, 0.0, 1.0);
     line_insert_with_axis(&axis, control_point_a3d, control_point_b3d)
 }
+
 pub fn line_insert_with_axis(
     axis: &Vector3<f32>,
     control_point_a3d: &Vector3<f32>,
@@ -390,34 +391,6 @@ pub fn line_insert_with_plane(
     a + (b - a) * t
 }
 
-// https://paulbourke.net/geometry/pointlineplane/lineline.c
-pub fn find_distrance_between_lines(
-    p1: &Vector3<f32>,
-    p2: &Vector3<f32>,
-    p3: &Vector3<f32>,
-    p4: &Vector3<f32>,
-) -> (Vector3<f32>, Vector3<f32>) {
-    let p13 = p1 - p3;
-    let p43 = p4 - p3;
-    let p21 = p2 - p1;
-
-    let d1343 = p13.x * p43.x + p13.y * p43.y + p13.z * p43.z;
-    let d4321 = p43.x * p21.x + p43.y * p21.y + p43.z * p21.z;
-    let d1321 = p13.x * p21.x + p13.y * p21.y + p13.z * p21.z;
-    let d4343 = p43.x * p43.x + p43.y * p43.y + p43.z * p43.z;
-    let d2121 = p21.x * p21.x + p21.y * p21.y + p21.z * p21.z;
-
-    let denom = d2121 * d4343 - d4321 * d4321;
-    let numer = d1343 * d4321 - d1321 * d4343;
-
-    let mua = numer / denom;
-    let mub = (d1343 + d4321 * (mua)) / d4343;
-
-    let pa = p1 + p21 * mua;
-    let pb = p3 + p43 * mub;
-
-    (pa, pb)
-}
 #[derive(Clone)]
 pub struct ComputeSolution {
     pub view_transform: Matrix4<f32>,
