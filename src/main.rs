@@ -161,7 +161,7 @@ impl Perspective {
                 if self.axis_data.is_none() {
                     return;
                 };
-                let out: Lines = self.into();
+                let out = <Lines as From<&Perspective>>::from(self);
                 file.write_all(&serde_json::to_vec(&out).unwrap()).unwrap();
             }
             Message::Calculate => {
@@ -487,8 +487,8 @@ impl Perspective {
     }
 }
 
-impl From<&mut Perspective> for Lines {
-    fn from(value: &mut Perspective) -> Self {
+impl From<&Perspective> for Lines {
+    fn from(value: &Perspective) -> Self {
         let axis_data = value.axis_data.as_ref().unwrap();
         let lines = axis_data
             .borrow()
