@@ -36,7 +36,6 @@ enum CameraPoseMessage {
     Editline { component: Option<Component> },
     Redraw,
     MoveControlPoint { cursor: Point },
-    MoveScaleEndpoint { component: Component, cursor: Point },
 }
 pub struct ComputeCameraPose<'a, Message, Theme = iced::Theme, Renderer = iced::Renderer>
 where
@@ -131,17 +130,6 @@ where
                 self.axis_data.borrow_mut().control_point = cursor;
                 self.cache.clear();
             }
-            CameraPoseMessage::MoveScaleEndpoint { component, cursor } => {
-                match component {
-                    Component::A => {
-                        self.axis_data.borrow_mut().scale.0 = cursor;
-                    }
-                    Component::B => {
-                        self.axis_data.borrow_mut().scale.1 = cursor;
-                    }
-                };
-                self.cache.clear();
-            }
         }
     }
 
@@ -160,7 +148,7 @@ where
         match event {
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                 match &state.edit_state {
-                    Edit::ControlPoint | Edit::Scale { component: _ } => {
+                    Edit::ControlPoint => {
                         state.edit_state = Edit::None;
                         (Status::Captured, Some(CameraPoseMessage::Redraw))
                     }
@@ -209,17 +197,6 @@ where
                     state.edit_state = Edit::ControlPoint;
                     return (Status::Captured, Some(CameraPoseMessage::Redraw));
                 } else {
-                    let (p1, p2) = &self.axis_data.borrow().scale;
-                    if check_if_point_is_from_line(p1, p2, scale_cursor) {
-                        let (p1, _p2) = self.axis_data.borrow().scale;
-                        let component = if should_edit_point(scale_cursor, p1) {
-                            Component::A
-                        } else {
-                            Component::B
-                        };
-                        state.edit_state = Edit::Scale { component };
-                        return (Status::Captured, Some(CameraPoseMessage::Redraw));
-                    };
                     for (index, (p1, p2)) in self.axis_data.borrow().axis_lines.iter().enumerate() {
                         if check_if_point_is_from_line(p1, p2, scale_cursor) {
                             return (
@@ -241,13 +218,6 @@ where
                 Edit::ControlPoint => (
                     Status::Captured,
                     Some(CameraPoseMessage::MoveControlPoint {
-                        cursor: scale_cursor,
-                    }),
-                ),
-                Edit::Scale { component } => (
-                    Status::Captured,
-                    Some(CameraPoseMessage::MoveScaleEndpoint {
-                        component: component.clone(),
                         cursor: scale_cursor,
                     }),
                 ),
@@ -281,32 +251,6 @@ where
         let color_green = Color::from_rgba(0.2, 0.8, 0.2, 0.8);
         let color_blue = Color::from_rgba(0.2, 0.2, 0.8, 0.8);
         let draw = self.cache.draw(renderer, bounds.size(), |frame| {
-            let mut builder = canvas::path::Builder::new();
-
-            let (p1, p2) = self.axis_data.borrow().scale;
-            let p1 = scale_point_to_canvas(&Point::new(p1.x, p1.y), bounds.size());
-            let p2 = scale_point_to_canvas(&Point::new(p2.x, p2.y), bounds.size());
-            builder.move_to(p1);
-            builder.line_to(p2);
-
-            builder.circle(p1, 5f32);
-            builder.circle(p2, 5f32);
-            frame.fill_text(Text {
-                content: "scale".to_string(),
-                position: Point::new((p1.x + p2.x) / 2f32, (p1.y + p2.y) / 2f32),
-                color: Color::from_rgba(0.8, 0.8, 0.8, 0.8),
-                ..Default::default()
-            });
-            let path = builder.build();
-            frame.stroke(
-                &path,
-                Stroke {
-                    style: canvas::Style::Solid(Color::from_rgba(0.8, 0.8, 0.8, 0.8)),
-                    width: 1.0,
-                    ..Stroke::default()
-                },
-            );
-
             if let Some(highlight) = state.highlight {
                 let mut builder = canvas::path::Builder::new();
 

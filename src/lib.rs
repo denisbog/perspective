@@ -62,9 +62,6 @@ pub enum Component {
 #[derive(Default, Clone, Debug)]
 pub enum Edit {
     ControlPoint,
-    Scale {
-        component: Component,
-    },
     Draw,
     EditX,
     EditY,
@@ -81,16 +78,15 @@ pub struct PerspectiveState {
 pub struct AxisData {
     pub axis_lines: Vec<(Point, Point)>,
     pub control_point: Point,
-    pub scale: (Point, Point),
     pub flip: (bool, bool, bool),
-    pub custom_origin_tanslation: Option<Vector3<f32>>,
+    pub custom_origin_translation: Option<Vector3<f32>>,
+    pub custom_scale: Option<Vector3<f32>>,
 }
 
 impl Default for AxisData {
     fn default() -> Self {
         Self {
             control_point: Point::new(0.5, 0.5),
-            scale: (Point::new(0.5, 0.5), Point::new(0.75, 0.75)),
             axis_lines: vec![
                 (
                     Point::new(0.49291667, 0.8496296),
@@ -118,7 +114,8 @@ impl Default for AxisData {
                 ),
             ],
             flip: (false, false, false),
-            custom_origin_tanslation: None,
+            custom_origin_translation: None,
+            custom_scale: None,
         }
     }
 }

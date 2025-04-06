@@ -19,7 +19,7 @@ use iced::{
 use nalgebra::{Matrix3, Perspective3, Point3, Vector2, Vector3};
 
 use crate::{
-    Component, Edit,
+    AxisData, Component, Edit,
     compute::{ComputeSolution, line_insert_with_plane, relative_to_image_plane},
 };
 
@@ -35,12 +35,12 @@ where
     draw_lines: Rc<RefCell<Vec<Vector3<f32>>>>,
     draw_lines_cache: geometry::Cache<Renderer>,
 
+    axis_data: Rc<RefCell<AxisData>>,
     compute_solution: &'a Option<ComputeSolution>,
     renderer_: PhantomData<Renderer>,
     theme_: PhantomData<Theme>,
     image_size: Size<f32>,
     traslate_origin: Rc<RefCell<Vector3<f32>>>,
-    scale: Rc<RefCell<Vector3<f32>>>,
 }
 impl<'a, Message, Theme, Renderer> Scale<'a, Message, Theme, Renderer>
 where
@@ -48,14 +48,15 @@ where
 {
     const DEFAULT_SIZE: f32 = 100.0;
     pub fn new(
+        axis_data: Rc<RefCell<AxisData>>,
         compute_solution: &'a Option<ComputeSolution>,
         draw_lines: Rc<RefCell<Vec<Vector3<f32>>>>,
         traslate_origin: Rc<RefCell<Vector3<f32>>>,
-        scale: Rc<RefCell<Vector3<f32>>>,
     ) -> Self {
         Self {
             width: Length::Fixed(Self::DEFAULT_SIZE),
             height: Length::Fixed(Self::DEFAULT_SIZE),
+            axis_data,
             compute_solution,
             message_: PhantomData,
             renderer_: PhantomData,
@@ -65,7 +66,6 @@ where
             draw_lines_cache: geometry::Cache::default(),
             draw_lines,
             traslate_origin,
-            scale,
         }
     }
     pub fn width(mut self, width: impl Into<Length>) -> Self {
@@ -95,6 +95,7 @@ where
             return (Status::Ignored, None);
         };
         let cursor = cursor - bounds.position();
+
         match event {
             Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Right)) => {
                 if self.draw_lines.borrow().len() > 1 {
@@ -122,9 +123,7 @@ where
                     _ => new_point_3d,
                 };
 
-                self.scale.borrow_mut().x = location3d.x;
-                self.scale.borrow_mut().y = location3d.y;
-                self.scale.borrow_mut().z = location3d.z;
+                self.axis_data.borrow_mut().custom_scale = Some(location3d);
 
                 self.draw_cache.clear();
                 state.draw = false;
@@ -216,10 +215,13 @@ where
             let new_point_3d = if state.draw {
                 new_point_3d
             } else {
-                self.scale.borrow().clone()
+                if self.axis_data.borrow().custom_scale.is_none() {
+                    self.axis_data.borrow_mut().custom_scale = Some(Vector3::new(0.0, 0.0, 0.0));
+                }
+                self.axis_data.borrow().custom_scale.unwrap()
             };
 
-            let last_point_3d = &Vector3::zeros();
+            let last_point_3d = *self.draw_lines.borrow().last().unwrap();
             let location3d = match state.edit_state {
                 Edit::EditX => Vector3::new(new_point_3d.x, last_point_3d.y, last_point_3d.z),
                 Edit::EditY => Vector3::new(last_point_3d.x, new_point_3d.y, last_point_3d.z),
@@ -228,7 +230,7 @@ where
             };
 
             let Some(last_point) =
-                self.calculate_location_position_to_2d(state, bounds, last_point_3d)
+                self.calculate_location_position_to_2d(state, bounds, &last_point_3d)
             else {
                 return;
             };

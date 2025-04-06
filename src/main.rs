@@ -19,8 +19,9 @@ use iced::Length::Fill;
 use iced::widget::{button, center, column, image, row, slider, stack, text};
 use iced::{Element, Length, Size, Task, Theme};
 use perspective::compute::{
-    ComputeSolution, Lines, StoreLine, StorePoint, StorePoint3d, compute_ui_adapter,
-    compute_ui_adapter_scale, read_points_from_file, store_scene_data_to_file,
+    ComputeSolution, Lines, StoreLine, StorePoint, StorePoint3d, compute_camera_pose_scale,
+    compute_camera_pose_translation, compute_ui_adapter, read_points_from_file,
+    store_scene_data_to_file,
 };
 use tracing::{trace, warn};
 use tracing_subscriber::EnvFilter;
@@ -83,7 +84,6 @@ struct Perspective {
     selected_image: u8,
     images: Vec<String>,
     traslate_origin: Rc<RefCell<Vector3<f32>>>,
-    scale: Rc<RefCell<Vector3<f32>>>,
     mode: UiMod,
 }
 #[derive(Debug, Clone)]
@@ -168,23 +168,26 @@ impl Perspective {
                     .collect::<Vec<StoreLine>>();
 
                 let custom_origin_tanslation =
-                    if let Some(item) = axis_data.borrow().custom_origin_tanslation {
-                        Some(StorePoint3d {
+                    axis_data
+                        .borrow()
+                        .custom_origin_translation
+                        .map(|item| StorePoint3d {
                             x: item.x,
                             y: item.y,
                             z: item.z,
-                        })
-                    } else {
-                        None
-                    };
+                        });
 
+                let custom_scale = axis_data.borrow().custom_scale.map(|item| StorePoint3d {
+                    x: item.x,
+                    y: item.y,
+                    z: item.z,
+                });
                 let store = Lines {
                     lines,
                     control_point: StorePoint {
                         x: axis_data.borrow().control_point.x,
                         y: axis_data.borrow().control_point.y,
                     },
-                    scale: StoreLine::from(&axis_data.borrow().scale),
                     points: Some(
                         self.draw_lines
                             .borrow()
@@ -202,6 +205,7 @@ impl Perspective {
                         axis_data.borrow().flip.2,
                     ]),
                     custom_origin_tanslation,
+                    custom_scale,
                 };
                 file.write_all(&serde_json::to_vec(&store).unwrap())
                     .unwrap();
@@ -224,7 +228,6 @@ impl Perspective {
                 ];
 
                 let control_point = &axis_data.borrow().control_point;
-                let scale = &axis_data.borrow().scale;
                 self.compute_solution = Some(block_on(async {
                     let compute_solution = compute_ui_adapter(
                         lines_x,
@@ -232,11 +235,10 @@ impl Perspective {
                         lines_z,
                         self.image_size,
                         control_point,
-                        scale,
                         axis_data.borrow().flip,
-                        &axis_data.borrow().custom_origin_tanslation,
+                        &axis_data.borrow().custom_origin_translation,
+                        &axis_data.borrow().custom_scale,
                     )
-                    .await
                     .unwrap();
 
                     let data = store_scene_data_to_file(
@@ -259,7 +261,7 @@ impl Perspective {
                 if let Some(image_data) = image_data {
                     self.axis_data = Some(Rc::new(RefCell::new(image_data.axis_data)));
                     if let Some(lines) = image_data.lines {
-                        self.traslate_origin = Rc::new(RefCell::new(lines.last().unwrap().clone()));
+                        self.traslate_origin = Rc::new(RefCell::new(*lines.last().unwrap()));
                         self.draw_lines = Rc::new(RefCell::new(lines));
                     }
                 } else {
@@ -298,48 +300,63 @@ impl Perspective {
                 axis_data.borrow_mut().flip = (flip_x, flip_y, flip_z);
             }
             Message::AddTranslation => {
-                let Some(axis_data) = &self.axis_data else {
-                    return;
-                };
-                axis_data.borrow_mut().custom_origin_tanslation =
-                    Some(self.traslate_origin.borrow().clone());
-                self.update(Message::Calculate);
+                {
+                    let Some(axis_data) = &self.axis_data else {
+                        return;
+                    };
+
+                    let Some(compute_solution) = self.compute_solution.clone() else {
+                        return;
+                    };
+
+                    let Some(custom_origin_translation) =
+                        &axis_data.borrow().custom_origin_translation
+                    else {
+                        return;
+                    };
+
+                    self.compute_solution = Some(
+                        compute_camera_pose_translation(
+                            compute_solution,
+                            custom_origin_translation,
+                        )
+                        .unwrap(),
+                    );
+                }
                 self.update(Message::SavePoseToFile);
             }
             Message::ResetTranslation => {
                 let Some(axis_data) = &self.axis_data else {
                     return;
                 };
-                axis_data.borrow_mut().custom_origin_tanslation = None;
+                axis_data.borrow_mut().custom_origin_translation = None;
                 self.update(Message::Calculate);
                 self.update(Message::SavePoseToFile);
             }
             Message::ApplyScale => {
-                let Some(axis_data) = &self.axis_data else {
-                    return;
-                };
+                {
+                    let Some(axis_data) = &self.axis_data else {
+                        return;
+                    };
 
-                let Some(compute_solution) = self.compute_solution.clone() else {
-                    return;
-                };
+                    let Some(compute_solution) = self.compute_solution.clone() else {
+                        return;
+                    };
 
-                let scale = &self.scale.borrow();
-                self.compute_solution = Some(block_on(async {
-                    let compute_solution = compute_ui_adapter_scale(
-                        scale,
-                        &axis_data.borrow().custom_origin_tanslation,
-                        compute_solution,
-                    )
-                    .await
-                    .unwrap();
-                    compute_solution
-                }));
+                    let Some(scale) = &axis_data.borrow().custom_scale else {
+                        return;
+                    };
+
+                    self.compute_solution =
+                        Some(compute_camera_pose_scale(compute_solution, scale).unwrap());
+                }
+                self.update(Message::SavePoseToFile);
             }
             Message::SavePoseToFile => {
                 let Some(compute_solution) = &self.compute_solution else {
                     return;
                 };
-                Some(block_on(async {
+                block_on(async {
                     let data = store_scene_data_to_file(
                         compute_solution,
                         self.image_size.width as u32,
@@ -349,23 +366,20 @@ impl Perspective {
                     )
                     .await;
                     trace!("scene data: {:?}", data);
-                }));
+                });
             }
         }
     }
     fn view(&self) -> Element<Message> {
-        if self.axis_data.is_none() {
+        let Some(axis_data) = &self.axis_data else {
             return center(text("Loading...").width(Fill).align_x(Center).size(50)).into();
         };
         let component: Element<Message> = match self.mode {
-            UiMod::Pose => ComputeCameraPose::new(
-                self.axis_data.as_ref().unwrap().clone(),
-                &self.compute_solution,
-            )
-            .image_size(self.image_size)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
+            UiMod::Pose => ComputeCameraPose::new(Rc::clone(axis_data), &self.compute_solution)
+                .image_size(self.image_size)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into(),
             UiMod::Draw => DrawLine::new(
                 &self.compute_solution,
                 Rc::clone(&self.draw_lines),
@@ -376,10 +390,10 @@ impl Perspective {
             .height(Length::Fill)
             .into(),
             UiMod::Scale => Scale::new(
+                Rc::clone(axis_data),
                 &self.compute_solution,
                 Rc::clone(&self.draw_lines),
                 Rc::clone(&self.traslate_origin),
-                Rc::clone(&self.scale),
             )
             .image_size(self.image_size)
             .width(Length::Fill)
@@ -515,7 +529,7 @@ impl Perspective {
 #[cfg(test)]
 mod tests {
     use anyhow::Result;
-    use nalgebra::{Matrix3, RowVector3, Vector2};
+    use nalgebra::{Matrix3, RowVector3, Vector2, Vector3};
     use perspective::compute::{
         compute_camera_pose, compute_camera_pose_scale, find_vanishing_point_for_lines,
         relative_to_image_plane, store_scene_data_to_file,
@@ -547,11 +561,6 @@ mod tests {
 
         let user_selected_origin = Vector2::new(0.66607594, 0.5972433);
 
-        let handle_position = vec![
-            Vector2::new(0.666962, 0.5956681),
-            Vector2::new(0.80341774, 0.49957806),
-        ];
-
         let axis = Matrix3::from_rows(&[
             RowVector3::new(1.0, 0.0, 0.0),
             RowVector3::new(0.0, -1.0, 0.0),
@@ -570,19 +579,11 @@ mod tests {
             .map(|point| relative_to_image_plane(ratio, point))
             .collect::<Vec<Vector2<f32>>>();
 
-        let scale_segment = handle_position
-            .iter()
-            .map(|point| relative_to_image_plane(ratio, point))
-            .collect::<Vec<Vector2<f32>>>();
-
-        let compute_solution = compute_camera_pose(&vanishing_points, &user_selected_origin, axis)
-            .await
-            .unwrap();
+        let compute_solution =
+            compute_camera_pose(&vanishing_points, &user_selected_origin, axis).unwrap();
 
         let compute_solution =
-            compute_camera_pose_scale(compute_solution, &user_selected_origin, &scale_segment)
-                .await
-                .unwrap();
+            compute_camera_pose_scale(compute_solution, &Vector3::new(0.0, 0.0, 1.75)).unwrap();
 
         store_scene_data_to_file(
             &compute_solution,

@@ -2,7 +2,7 @@ use std::{fs::File, io::Read};
 
 use anyhow::Result;
 use iced::{Point, Size};
-use nalgebra::{Matrix3, Matrix4, Perspective3, Point2, Point3, RowVector3, Vector2, Vector3};
+use nalgebra::{Matrix3, Matrix4, Point2, RowVector3, Vector2, Vector3};
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio_util::{bytes::BytesMut, codec::Encoder};
@@ -21,11 +21,11 @@ pub struct StorePoint {
 #[derive(Serialize, Deserialize)]
 pub struct Lines {
     pub control_point: StorePoint,
-    pub scale: StoreLine,
     pub lines: Vec<StoreLine>,
     pub points: Option<Vec<StorePoint3d>>,
     pub flip: Option<[bool; 3]>,
     pub custom_origin_tanslation: Option<StorePoint3d>,
+    pub custom_scale: Option<StorePoint3d>,
 }
 #[derive(Serialize, Deserialize)]
 pub struct StoreLine {
@@ -70,17 +70,6 @@ pub fn read_points_from_file(points: &String) -> (AxisData, Option<Vec<Vector3<f
         })
         .collect();
 
-    let scale = (
-        Point {
-            x: data.scale.a.x,
-            y: data.scale.a.y,
-        },
-        Point {
-            x: data.scale.b.x,
-            y: data.scale.b.y,
-        },
-    );
-
     let control_point = Point {
         x: data.control_point.x,
         y: data.control_point.y,
@@ -98,24 +87,21 @@ pub fn read_points_from_file(points: &String) -> (AxisData, Option<Vec<Vector3<f
         (false, false, false)
     };
 
-    let custom_origin_tanslation =
-        if let Some(custom_origin_tanslation) = data.custom_origin_tanslation {
-            Some(Vector3::new(
-                custom_origin_tanslation.x,
-                custom_origin_tanslation.y,
-                custom_origin_tanslation.z,
-            ))
-        } else {
-            None
-        };
+    let custom_origin_translation = data
+        .custom_origin_tanslation
+        .map(|item| Vector3::new(item.x, item.y, item.z));
+
+    let custom_scale = data
+        .custom_scale
+        .map(|item| Vector3::new(item.x, item.y, item.z));
 
     (
         AxisData {
             control_point,
-            scale,
             axis_lines: lines,
             flip,
-            custom_origin_tanslation,
+            custom_origin_translation,
+            custom_scale,
         },
         points,
     )
@@ -156,15 +142,15 @@ pub async fn store_scene_data_to_file(
     repackage_file.write_all(&dst).await.unwrap();
     Ok(data)
 }
-pub async fn compute_ui_adapter(
+pub fn compute_ui_adapter(
     x_lines: [(Point, Point); 2],
     y_lines: [(Point, Point); 2],
     z_lines: [(Point, Point); 2],
     image_size: Size<f32>,
     control_point: &Point,
-    scale: &(Point, Point),
     flip: (bool, bool, bool),
     translate_origin: &Option<Vector3<f32>>,
+    scale: &Option<Vector3<f32>>,
 ) -> Result<ComputeSolution> {
     let points: [Vector2<f32>; 12] = [
         Vector2::new(x_lines[0].0.x, x_lines[0].0.y),
@@ -179,10 +165,6 @@ pub async fn compute_ui_adapter(
         Vector2::new(z_lines[0].1.x, z_lines[0].1.y),
         Vector2::new(z_lines[1].0.x, z_lines[1].0.y),
         Vector2::new(z_lines[1].1.x, z_lines[1].1.y),
-    ];
-    let scale = [
-        Vector2::new(scale.0.x, scale.0.y),
-        Vector2::new(scale.1.x, scale.1.y),
     ];
     let control_point: Vector2<f32> = Vector2::new(control_point.x, control_point.y);
 
@@ -209,22 +191,20 @@ pub async fn compute_ui_adapter(
         .collect::<Vec<Vector2<f32>>>();
     trace!("vanishing point {:?}", vanishing_points);
 
-    let compute_solution =
-        compute_camera_pose(&vanishing_points, &user_selected_origin, axis).await;
-
-    let scale_segment = scale
-        .iter()
-        .map(|point| relative_to_image_plane(ratio, point))
-        .collect::<Vec<Vector2<f32>>>();
+    let compute_solution = compute_camera_pose(&vanishing_points, &user_selected_origin, axis);
 
     let compute_solution = if let Ok(compute_solution) = compute_solution {
-        compute_camera_pose_scale(compute_solution, &user_selected_origin, &scale_segment).await
+        if let Some(scale) = scale {
+            compute_camera_pose_scale(compute_solution, scale)
+        } else {
+            Ok(compute_solution)
+        }
     } else {
         compute_solution
     };
     if let Some(translate_origin) = translate_origin {
         if let Ok(compute_solution) = compute_solution {
-            compute_camera_pose_translation(compute_solution, &translate_origin).await
+            compute_camera_pose_translation(compute_solution, translate_origin)
         } else {
             compute_solution
         }
@@ -233,59 +213,25 @@ pub async fn compute_ui_adapter(
     }
 }
 
-pub async fn compute_ui_adapter_scale(
-    scale: &Vector3<f32>,
-    translate_origin: &Option<Vector3<f32>>,
-    compute_solution: ComputeSolution,
-) -> Result<ComputeSolution> {
-    let compute_solution = compute_camera_pose_scale_new(compute_solution, &scale).await;
-    if let Some(translate_origin) = translate_origin {
-        if let Ok(compute_solution) = compute_solution {
-            compute_camera_pose_translation(compute_solution, &translate_origin).await
-        } else {
-            compute_solution
-        }
-    } else {
-        compute_solution
-    }
-}
-
-pub async fn compute_camera_pose_scale_new(
+pub fn compute_camera_pose_scale(
     mut compute_solution: ComputeSolution,
     scale_segment: &Vector3<f32>,
 ) -> Result<ComputeSolution> {
     let distance = scale_segment.norm();
-    compute_solution.view_transform =
-        compute_solution.view_transform * Matrix4::new_scaling(distance);
-    Ok(compute_solution)
-}
-pub async fn compute_camera_pose_scale(
-    mut compute_solution: ComputeSolution,
-    user_selected_origin: &Vector2<f32>,
-    scale_segment: &Vec<Vector2<f32>>,
-) -> Result<ComputeSolution> {
-    let distance = find_scale_to_apply(
-        compute_solution.focal_length,
-        compute_solution.ortho_center,
-        compute_solution.view_transform,
-        user_selected_origin,
-        scale_segment,
-    );
-    compute_solution.view_transform =
-        compute_solution.view_transform * Matrix4::new_scaling(distance);
+    compute_solution.view_transform *= Matrix4::new_scaling(distance);
     Ok(compute_solution)
 }
 
-pub async fn compute_camera_pose_translation(
+pub fn compute_camera_pose_translation(
     mut compute_solution: ComputeSolution,
     translate_origin: &Vector3<f32>,
 ) -> Result<ComputeSolution> {
-    compute_solution.view_transform = compute_solution.view_transform
-        * Matrix4::new_translation(&(Vector3::zeros() - translate_origin));
+    compute_solution.view_transform *=
+        Matrix4::new_translation(&(Vector3::zeros() - translate_origin));
     Ok(compute_solution)
 }
-pub async fn compute_camera_pose(
-    vanishing_points: &Vec<Vector2<f32>>,
+pub fn compute_camera_pose(
+    vanishing_points: &[Vector2<f32>],
     user_selected_origin: &Vector2<f32>,
     axis: Matrix3<f32>,
 ) -> Result<ComputeSolution> {
@@ -360,62 +306,6 @@ pub async fn compute_camera_pose(
         ortho_center,
         focal_length,
     ))
-}
-
-fn find_scale_to_apply(
-    focal_length: f32,
-    ortho_center: Vector2<f32>,
-    view_transform: Matrix4<f32>,
-    user_selected_origin: &Vector2<f32>,
-    scale_segment_points: &Vec<Vector2<f32>>,
-) -> f32 {
-    let handle_position_a = scale_segment_points[0];
-    let handle_position_b = scale_segment_points[1];
-
-    let point3d = [
-        Vector3::new(0.0, 0.0, 0.0),
-        Vector3::new(user_selected_origin.x, user_selected_origin.y, 1.0),
-        Vector3::new(handle_position_a.x, handle_position_a.y, 1.0),
-        Vector3::new(handle_position_b.x, handle_position_b.y, 1.0),
-    ];
-
-    let projection = Perspective3::new(1.0, 2.0 * (1.0 / focal_length).atan(), 0.01, 10.0);
-    trace!("projection: {:#?}", projection);
-    let mut matrix = projection.into_inner();
-    *matrix.index_mut((0, 2)) = -ortho_center.x;
-    *matrix.index_mut((1, 2)) = -ortho_center.y;
-    trace!("matrix: {matrix}");
-
-    //  let translation = Matrix4::new_translation(&origin3d);
-    let point3d = point3d
-        .iter()
-        .map(|&point| {
-            let temp = view_transform.try_inverse().unwrap()
-    //            * translation.try_inverse().unwrap()
-                * matrix.try_inverse().unwrap()
-                * Point3::from(point).to_homogeneous();
-            Point3::from_homogeneous(temp).unwrap().coords
-
-            // Point3::from_homogeneous(unproject_matrix * Point3::from(point).to_homogeneous())
-            //     .unwrap()
-            //     .coords
-        })
-        .collect::<Vec<Vector3<f32>>>();
-    trace!("point3d {:#?}", point3d);
-
-    let intersection1_3d = line_insert_with_yz_plane(&point3d[0], &point3d[1]);
-    trace!("intersection3d: {intersection1_3d}");
-    let intersection2_3d = intersection1_3d + Vector3::new(1.0, 0.0, 0.0);
-
-    let distance = point3d[2..]
-        .iter()
-        .map(|point| {
-            find_distrance_between_lines(&point3d[0], point, &intersection1_3d, &intersection2_3d)
-        })
-        .collect::<Vec<(Vector3<f32>, Vector3<f32>)>>();
-    trace!("distance: {:#?}", distance);
-    let distance = (distance[0].0 - distance[1].0).norm();
-    distance
 }
 
 pub fn find_vanishing_point_for_lines(
