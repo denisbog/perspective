@@ -49,8 +49,8 @@ pub fn main() -> iced::Result {
 
 #[derive(Default, Clone, Debug)]
 enum UiMod {
-    #[default]
     Pose,
+    #[default]
     Draw,
     Scale,
 }
@@ -66,7 +66,8 @@ enum Message {
     SelectImage(u8),
     Flip(bool, bool, bool),
     ApplyScale,
-    AddTranslation,
+    ResetScale,
+    ApplyTranslation,
     ResetTranslation,
     ChangeMode(UiMod),
     SavePoseToFile,
@@ -157,58 +158,11 @@ impl Perspective {
         match message {
             Message::Save => {
                 let mut file = File::create(self.points_file_name.clone()).unwrap();
-                let Some(axis_data) = &self.axis_data else {
+                if self.axis_data.is_none() {
                     return;
                 };
-                let lines = axis_data
-                    .borrow()
-                    .axis_lines
-                    .iter()
-                    .map(Into::into)
-                    .collect::<Vec<StoreLine>>();
-
-                let custom_origin_tanslation =
-                    axis_data
-                        .borrow()
-                        .custom_origin_translation
-                        .map(|item| StorePoint3d {
-                            x: item.x,
-                            y: item.y,
-                            z: item.z,
-                        });
-
-                let custom_scale = axis_data.borrow().custom_scale.map(|item| StorePoint3d {
-                    x: item.x,
-                    y: item.y,
-                    z: item.z,
-                });
-                let store = Lines {
-                    lines,
-                    control_point: StorePoint {
-                        x: axis_data.borrow().control_point.x,
-                        y: axis_data.borrow().control_point.y,
-                    },
-                    points: Some(
-                        self.draw_lines
-                            .borrow()
-                            .iter()
-                            .map(|item| StorePoint3d {
-                                x: item.x,
-                                y: item.y,
-                                z: item.z,
-                            })
-                            .collect(),
-                    ),
-                    flip: Some([
-                        axis_data.borrow().flip.0,
-                        axis_data.borrow().flip.1,
-                        axis_data.borrow().flip.2,
-                    ]),
-                    custom_origin_tanslation,
-                    custom_scale,
-                };
-                file.write_all(&serde_json::to_vec(&store).unwrap())
-                    .unwrap();
+                let out: Lines = self.into();
+                file.write_all(&serde_json::to_vec(&out).unwrap()).unwrap();
             }
             Message::Calculate => {
                 let Some(axis_data) = &self.axis_data else {
@@ -226,10 +180,9 @@ impl Perspective {
                     axis_data.borrow().axis_lines[4],
                     axis_data.borrow().axis_lines[5],
                 ];
-
                 let control_point = &axis_data.borrow().control_point;
-                self.compute_solution = Some(block_on(async {
-                    let compute_solution = compute_ui_adapter(
+                self.compute_solution = Some(
+                    compute_ui_adapter(
                         lines_x,
                         lines_y,
                         lines_z,
@@ -239,19 +192,8 @@ impl Perspective {
                         &axis_data.borrow().custom_origin_translation,
                         &axis_data.borrow().custom_scale,
                     )
-                    .unwrap();
-
-                    let data = store_scene_data_to_file(
-                        &compute_solution,
-                        self.image_size.width as u32,
-                        self.image_size.height as u32,
-                        self.image_path.clone(),
-                        self.export_file_name.clone(),
-                    )
-                    .await;
-                    trace!("scene data: {:?}", data);
-                    compute_solution
-                }));
+                    .unwrap(),
+                );
             }
             Message::LoadApplicationState {
                 image_data,
@@ -267,11 +209,13 @@ impl Perspective {
                 } else {
                     self.axis_data = Some(Rc::new(RefCell::new(AxisData::default())));
                 }
+                self.update(Message::Calculate);
             }
             Message::ChangeMode(mode) => {
                 self.mode = mode;
             }
             Message::SelectImage(selected) => {
+                self.update(Message::SavePoseToFile);
                 self.selected_image = selected;
                 let selected_image_name = self
                     .images
@@ -291,7 +235,6 @@ impl Perspective {
                     load(selected_image_name, self.points_file_name.clone(), false).await
                 })));
                 self.update(Message::Calculate);
-                self.update(Message::SavePoseToFile);
             }
             Message::Flip(flip_x, flip_y, flip_z) => {
                 let Some(axis_data) = &self.axis_data else {
@@ -299,31 +242,24 @@ impl Perspective {
                 };
                 axis_data.borrow_mut().flip = (flip_x, flip_y, flip_z);
             }
-            Message::AddTranslation => {
-                {
-                    let Some(axis_data) = &self.axis_data else {
-                        return;
-                    };
+            Message::ApplyTranslation => {
+                let Some(axis_data) = &self.axis_data else {
+                    return;
+                };
 
-                    let Some(compute_solution) = self.compute_solution.clone() else {
-                        return;
-                    };
+                let Some(compute_solution) = self.compute_solution.clone() else {
+                    return;
+                };
 
-                    let Some(custom_origin_translation) =
-                        &axis_data.borrow().custom_origin_translation
-                    else {
-                        return;
-                    };
+                let Some(custom_origin_translation) = &axis_data.borrow().custom_origin_translation
+                else {
+                    return;
+                };
 
-                    self.compute_solution = Some(
-                        compute_camera_pose_translation(
-                            compute_solution,
-                            custom_origin_translation,
-                        )
+                self.compute_solution = Some(
+                    compute_camera_pose_translation(compute_solution, custom_origin_translation)
                         .unwrap(),
-                    );
-                }
-                self.update(Message::SavePoseToFile);
+                );
             }
             Message::ResetTranslation => {
                 let Some(axis_data) = &self.axis_data else {
@@ -331,26 +267,26 @@ impl Perspective {
                 };
                 axis_data.borrow_mut().custom_origin_translation = None;
                 self.update(Message::Calculate);
-                self.update(Message::SavePoseToFile);
             }
             Message::ApplyScale => {
-                {
-                    let Some(axis_data) = &self.axis_data else {
-                        return;
-                    };
+                let Some(axis_data) = &self.axis_data else {
+                    return;
+                };
 
-                    let Some(compute_solution) = self.compute_solution.clone() else {
-                        return;
-                    };
+                let Some(compute_solution) = self.compute_solution.clone() else {
+                    return;
+                };
 
-                    let Some(scale) = &axis_data.borrow().custom_scale else {
-                        return;
-                    };
+                let Some(scale) = &axis_data.borrow().custom_scale else {
+                    return;
+                };
 
-                    self.compute_solution =
-                        Some(compute_camera_pose_scale(compute_solution, scale).unwrap());
-                }
-                self.update(Message::SavePoseToFile);
+                self.compute_solution =
+                    Some(compute_camera_pose_scale(compute_solution, scale).unwrap());
+            }
+            Message::ResetScale => {
+                self.axis_data.as_ref().unwrap().borrow_mut().custom_scale = None;
+                self.update(Message::Calculate);
             }
             Message::SavePoseToFile => {
                 let Some(compute_solution) = &self.compute_solution else {
@@ -404,6 +340,11 @@ impl Perspective {
         match self.mode {
             UiMod::Pose => {
                 buttons.push(
+                    button("Draw lines")
+                        .on_press(Message::ChangeMode(UiMod::Draw))
+                        .into(),
+                );
+                buttons.push(
                     button("Scale/Translation")
                         .on_press(Message::ChangeMode(UiMod::Scale))
                         .into(),
@@ -416,35 +357,36 @@ impl Perspective {
                 buttons.push(
                     button("Flip X")
                         .on_press(Message::Flip(
-                            !self.axis_data.as_ref().unwrap().borrow().flip.0,
-                            self.axis_data.as_ref().unwrap().borrow().flip.1,
-                            self.axis_data.as_ref().unwrap().borrow().flip.2,
+                            !axis_data.as_ref().borrow().flip.0,
+                            axis_data.as_ref().borrow().flip.1,
+                            axis_data.as_ref().borrow().flip.2,
                         ))
                         .into(),
                 );
                 buttons.push(
                     button("Flip Y")
                         .on_press(Message::Flip(
-                            self.axis_data.as_ref().unwrap().borrow().flip.0,
-                            !self.axis_data.as_ref().unwrap().borrow().flip.1,
-                            self.axis_data.as_ref().unwrap().borrow().flip.2,
+                            axis_data.as_ref().borrow().flip.0,
+                            !axis_data.as_ref().borrow().flip.1,
+                            axis_data.as_ref().borrow().flip.2,
                         ))
                         .into(),
                 );
                 buttons.push(
                     button("Flip Z")
                         .on_press(Message::Flip(
-                            self.axis_data.as_ref().unwrap().borrow().flip.0,
-                            self.axis_data.as_ref().unwrap().borrow().flip.1,
-                            !self.axis_data.as_ref().unwrap().borrow().flip.2,
+                            axis_data.as_ref().borrow().flip.0,
+                            axis_data.as_ref().borrow().flip.1,
+                            !axis_data.as_ref().borrow().flip.2,
                         ))
                         .into(),
                 );
                 buttons.push(
-                    button("Save Pose To File")
+                    button("Export Pose To FSpy")
                         .on_press(Message::SavePoseToFile)
                         .into(),
                 );
+                buttons.push(button("Save lines").on_press(Message::Save).into());
             }
             UiMod::Scale => {
                 buttons.push(
@@ -457,17 +399,36 @@ impl Perspective {
                         .on_press(Message::ChangeMode(UiMod::Draw))
                         .into(),
                 );
-                buttons.push(button("Apply Scale").on_press(Message::ApplyScale).into());
+                if axis_data.as_ref().borrow().custom_scale.is_some() {
+                    buttons.push(button("Reset Scale").on_press(Message::ResetScale).into());
+                } else {
+                    buttons.push(button("Apply Scale").on_press(Message::ApplyScale).into());
+                }
+
+                if axis_data
+                    .as_ref()
+                    .borrow()
+                    .custom_origin_translation
+                    .is_some()
+                {
+                    buttons.push(
+                        button("Apply Translation")
+                            .on_press(Message::ApplyTranslation)
+                            .into(),
+                    );
+                } else {
+                    buttons.push(
+                        button("Reset Translation")
+                            .on_press(Message::ResetTranslation)
+                            .into(),
+                    );
+                }
                 buttons.push(
-                    button("Apply Translation")
-                        .on_press(Message::AddTranslation)
+                    button("Export Pose To FSpy")
+                        .on_press(Message::SavePoseToFile)
                         .into(),
                 );
-                buttons.push(
-                    button("Reset Translation")
-                        .on_press(Message::ResetTranslation)
-                        .into(),
-                );
+                buttons.push(button("Save lines").on_press(Message::Save).into());
             }
             UiMod::Draw => {
                 buttons.push(
@@ -523,6 +484,60 @@ impl Perspective {
     }
     fn theme(&self) -> Theme {
         Theme::TokyoNight
+    }
+}
+
+impl From<&mut Perspective> for Lines {
+    fn from(value: &mut Perspective) -> Self {
+        let axis_data = value.axis_data.as_ref().unwrap();
+        let lines = axis_data
+            .borrow()
+            .axis_lines
+            .iter()
+            .map(Into::into)
+            .collect::<Vec<StoreLine>>();
+
+        let custom_origin_tanslation =
+            axis_data
+                .borrow()
+                .custom_origin_translation
+                .map(|item| StorePoint3d {
+                    x: item.x,
+                    y: item.y,
+                    z: item.z,
+                });
+
+        let custom_scale = axis_data.borrow().custom_scale.map(|item| StorePoint3d {
+            x: item.x,
+            y: item.y,
+            z: item.z,
+        });
+        Lines {
+            lines,
+            control_point: StorePoint {
+                x: axis_data.borrow().control_point.x,
+                y: axis_data.borrow().control_point.y,
+            },
+            points: Some(
+                value
+                    .draw_lines
+                    .borrow()
+                    .iter()
+                    .map(|item| StorePoint3d {
+                        x: item.x,
+                        y: item.y,
+                        z: item.z,
+                    })
+                    .collect(),
+            ),
+            flip: Some([
+                axis_data.borrow().flip.0,
+                axis_data.borrow().flip.1,
+                axis_data.borrow().flip.2,
+            ]),
+            custom_origin_tanslation,
+            custom_scale,
+        }
     }
 }
 
