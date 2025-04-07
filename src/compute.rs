@@ -47,12 +47,12 @@ impl From<&(Point, Point)> for StoreLine {
     }
 }
 
-pub fn read_points_from_file(points: &String) -> (AxisData, Option<Vec<Vector3<f32>>>) {
+pub fn read_points_from_file(points: &String) -> Result<(AxisData, Option<Vec<Vector3<f32>>>)> {
     trace!("reading points from file {points}");
-    let mut file = File::open(points).unwrap();
+    let mut file = File::open(points)?;
     let mut content = String::new();
-    file.read_to_string(&mut content).unwrap();
-    let data: Lines = serde_json::from_str(&content).unwrap();
+    file.read_to_string(&mut content)?;
+    let data: Lines = serde_json::from_str(&content)?;
     let lines = data
         .lines
         .iter()
@@ -95,7 +95,7 @@ pub fn read_points_from_file(points: &String) -> (AxisData, Option<Vec<Vector3<f
         .custom_scale
         .map(|item| Vector3::new(item.x, item.y, item.z));
 
-    (
+    Ok((
         AxisData {
             control_point,
             axis_lines: lines,
@@ -104,7 +104,7 @@ pub fn read_points_from_file(points: &String) -> (AxisData, Option<Vec<Vector3<f
             custom_scale,
         },
         points,
-    )
+    ))
 }
 
 pub fn adaptor_compute_solution_to_scene_settings(
@@ -122,12 +122,11 @@ pub async fn store_scene_data_to_file(
     image_path: String,
     export_file_name: String,
 ) -> Result<SceneSettings> {
-    let mut image_file = tokio::fs::File::open(image_path).await.unwrap();
+    let mut image_file = tokio::fs::File::open(image_path).await?;
     let mut contents = vec![];
-    image_file.read_to_end(&mut contents).await.unwrap();
+    image_file.read_to_end(&mut contents).await?;
     let data =
-        adaptor_compute_solution_to_scene_settings(image_width, image_height, compute_solution)
-            .unwrap();
+        adaptor_compute_solution_to_scene_settings(image_width, image_height, compute_solution)?;
     let to_export = FSpyData {
         data: data.clone(),
         image: contents,
@@ -138,8 +137,8 @@ pub async fn store_scene_data_to_file(
     let mut dst = BytesMut::with_capacity(4096);
     encoder.encode(to_export, &mut dst)?;
 
-    let mut repackage_file = tokio::fs::File::create(export_file_name).await.unwrap();
-    repackage_file.write_all(&dst).await.unwrap();
+    let mut repackage_file = tokio::fs::File::create(export_file_name).await?;
+    repackage_file.write_all(&dst).await?;
     Ok(data)
 }
 pub fn compute_ui_adapter(
@@ -189,7 +188,6 @@ pub fn compute_ui_adapter(
         .iter()
         .map(|point| relative_to_image_plane(ratio, point))
         .collect::<Vec<Vector2<f32>>>();
-    trace!("vanishing point {:?}", vanishing_points);
 
     let compute_solution = compute_camera_pose(&vanishing_points, &user_selected_origin, axis);
 
@@ -243,7 +241,6 @@ pub fn compute_camera_pose(
 
     // let ortho_center = relative_to_image_plane_new(ratio, &ortho_center);
     // axis
-    trace!("ortho center {ortho_center}");
 
     //let minimizer = GradientDescent::new();
     //let solution = minimizer
@@ -273,7 +270,6 @@ pub fn compute_camera_pose(
         .dot(&(ortho_center - vanishing_points[1]))
         .abs()
         .sqrt();
-    trace!("focal length: {focal_length}");
 
     let x_rotation = vanishing_points[0] - ortho_center;
     let x_rotation = Vector3::new(x_rotation.x, x_rotation.y, -focal_length).normalize();

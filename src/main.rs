@@ -26,6 +26,7 @@ use perspective::compute::{
 use tracing::{trace, warn};
 use tracing_subscriber::EnvFilter;
 
+use anyhow::Result;
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
@@ -58,6 +59,7 @@ enum UiMod {
 #[derive(Debug, Clone)]
 enum Message {
     Save,
+    ResetLines,
     Calculate,
     LoadApplicationState {
         image_data: Option<ImageData>,
@@ -70,7 +72,7 @@ enum Message {
     ApplyTranslation,
     ResetTranslation,
     ChangeMode(UiMod),
-    SavePoseToFile,
+    ExportToFSpy,
 }
 
 #[derive(Default)]
@@ -96,9 +98,9 @@ async fn load(
     image: String,
     points_file_name: String,
     load_lines: bool,
-) -> (Option<ImageData>, Size<u32>) {
+) -> Result<(Option<ImageData>, Size<u32>)> {
     let extracted_data = if Path::new(&points_file_name).exists() {
-        let read_from_file = read_points_from_file(&points_file_name);
+        let read_from_file = read_points_from_file(&points_file_name)?;
         let lines = if load_lines { read_from_file.1 } else { None };
         Some(ImageData {
             axis_data: read_from_file.0,
@@ -109,14 +111,15 @@ async fn load(
         None
     };
 
-    let decoded_image = ImageReader::open(&image).unwrap().decode().unwrap();
-    (
+    let decoded_image = ImageReader::open(&image)?.decode()?;
+    Ok((
         extracted_data,
         Size::new(decoded_image.width(), decoded_image.height()),
-    )
+    ))
 }
 
-fn extract_state(state: (Option<ImageData>, Size<u32>)) -> Message {
+fn extract_state(state: Result<(Option<ImageData>, Size<u32>)>) -> Message {
+    let state = state.unwrap();
     Message::LoadApplicationState {
         image_data: state.0,
         image_size: state.1,
@@ -215,7 +218,7 @@ impl Perspective {
                 self.mode = mode;
             }
             Message::SelectImage(selected) => {
-                self.update(Message::SavePoseToFile);
+                self.update(Message::Save);
                 self.selected_image = selected;
                 let selected_image_name = self
                     .images
@@ -288,7 +291,7 @@ impl Perspective {
                 self.axis_data.as_ref().unwrap().borrow_mut().custom_scale = None;
                 self.update(Message::Calculate);
             }
-            Message::SavePoseToFile => {
+            Message::ExportToFSpy => {
                 let Some(compute_solution) = &self.compute_solution else {
                     return;
                 };
@@ -303,6 +306,13 @@ impl Perspective {
                     .await;
                     trace!("scene data: {:?}", data);
                 });
+            }
+            Message::ResetLines => {
+                if let Ok(read_from_file) = read_points_from_file(&self.points_file_name) {
+                    if let Some(lines) = read_from_file.1 {
+                        *self.draw_lines.borrow_mut() = lines;
+                    }
+                }
             }
         }
     }
@@ -383,7 +393,7 @@ impl Perspective {
                 );
                 buttons.push(
                     button("Export Pose To FSpy")
-                        .on_press(Message::SavePoseToFile)
+                        .on_press(Message::ExportToFSpy)
                         .into(),
                 );
                 buttons.push(button("Save lines").on_press(Message::Save).into());
@@ -425,7 +435,7 @@ impl Perspective {
                 }
                 buttons.push(
                     button("Export Pose To FSpy")
-                        .on_press(Message::SavePoseToFile)
+                        .on_press(Message::ExportToFSpy)
                         .into(),
                 );
                 buttons.push(button("Save lines").on_press(Message::Save).into());
@@ -441,6 +451,7 @@ impl Perspective {
                         .on_press(Message::ChangeMode(UiMod::Scale))
                         .into(),
                 );
+                buttons.push(button("Reset Lines").on_press(Message::ResetLines).into());
                 buttons.push(button("Save lines").on_press(Message::Save).into());
             }
         }
