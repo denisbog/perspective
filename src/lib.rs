@@ -5,7 +5,6 @@ pub mod draw;
 pub mod draw_decoration;
 pub mod encoder;
 pub mod fspy;
-pub mod scale;
 pub mod utils;
 use iced::Point;
 use nalgebra::Vector3;
@@ -63,6 +62,14 @@ pub enum Component {
 pub enum Edit {
     ControlPoint,
     Draw,
+    Extrude(EditAxis),
+    Scale(EditAxis),
+    #[default]
+    None,
+}
+
+#[derive(Default, Clone, Debug)]
+pub enum EditAxis {
     EditX,
     EditY,
     EditZ,
@@ -80,7 +87,7 @@ pub struct AxisData {
     pub control_point: Point,
     pub flip: (bool, bool, bool),
     pub custom_origin_translation: Option<Vector3<f32>>,
-    pub custom_scale: Option<Vector3<f32>>,
+    pub custom_scale: Option<f32>,
 }
 
 impl Default for AxisData {

@@ -19,7 +19,7 @@ use iced::{
 use nalgebra::{Matrix3, Perspective3, Point3, Vector2, Vector3};
 
 use crate::{
-    Component, Edit,
+    Component, Edit, EditAxis,
     compute::{ComputeSolution, line_insert_with_plane, relative_to_image_plane},
 };
 
@@ -39,7 +39,9 @@ where
     renderer_: PhantomData<Renderer>,
     theme_: PhantomData<Theme>,
     image_size: Size<f32>,
-    traslate_origin: Rc<RefCell<Vector3<f32>>>,
+    custom_origin_translation: Rc<RefCell<Option<Vector3<f32>>>>,
+    custom_scale: Rc<RefCell<Option<Vector3<f32>>>>,
+    custom_scale_segment: Rc<RefCell<Option<usize>>>,
 }
 impl<'a, Message, Theme, Renderer> DrawLine<'a, Message, Theme, Renderer>
 where
@@ -49,7 +51,9 @@ where
     pub fn new(
         compute_solution: &'a Option<ComputeSolution>,
         draw_lines: Rc<RefCell<Vec<Vector3<f32>>>>,
-        traslate_origin: Rc<RefCell<Vector3<f32>>>,
+        custom_origin_translation: Rc<RefCell<Option<Vector3<f32>>>>,
+        custom_scale: Rc<RefCell<Option<Vector3<f32>>>>,
+        custom_scale_segment: Rc<RefCell<Option<usize>>>,
     ) -> Self {
         Self {
             width: Length::Fixed(Self::DEFAULT_SIZE),
@@ -62,7 +66,9 @@ where
             draw_cache: geometry::Cache::default(),
             draw_lines_cache: geometry::Cache::default(),
             draw_lines,
-            traslate_origin,
+            custom_origin_translation,
+            custom_scale,
+            custom_scale_segment,
         }
     }
     pub fn width(mut self, width: impl Into<Length>) -> Self {
@@ -94,55 +100,98 @@ where
         let cursor = cursor - bounds.position();
         match event {
             Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Right)) => {
-                if self.draw_lines.borrow().len() > 1 {
-                    self.draw_lines.borrow_mut().pop();
-                    self.draw_lines_cache.clear();
-                    self.draw_cache.clear();
-                }
-                state.draw = false;
+                state.edit_state = Edit::Draw;
                 (Status::Ignored, None)
             }
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
-                state.draw = true;
+                if let Edit::Draw = state.edit_state {
+                    let cursor = Point::new(cursor.x, cursor.y);
+                    for (index, point) in state.points.borrow().iter().enumerate() {
+                        if cursor.distance(*point) < 10.0 {
+                            state.selected = index;
+                            self.custom_origin_translation
+                                .replace(self.draw_lines.borrow().get(index).copied());
+                            self.draw_cache.clear();
+                            return (Status::Ignored, None);
+                        };
+                    }
+
+                    state
+                        .points
+                        .borrow()
+                        .windows(2)
+                        .enumerate()
+                        .for_each(|(index, items)| {
+                            let start = items[0];
+                            let end = items[1];
+                            if check_if_point_is_from_line_new(&start, &end, cursor) {
+                                self.custom_scale_segment.borrow_mut().replace(index);
+                                self.draw_cache.clear();
+                            }
+                        });
+                }
                 (Status::Ignored, None)
             }
             Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
-                let Some(new_point_3d) =
-                    self.calculate_cursor_position_to_3d(state, bounds, &cursor)
+                let Some((new_point_3d, _last_point_3d, _color)) =
+                    self.extract_last_point_details_for_mode(state, bounds, &cursor)
                 else {
                     return (Status::Ignored, None);
                 };
 
-                self.traslate_origin.borrow_mut().x = new_point_3d.x;
-                self.traslate_origin.borrow_mut().y = new_point_3d.y;
-                self.traslate_origin.borrow_mut().z = new_point_3d.z;
-
-                let last_point_3d = *self.draw_lines.borrow().last().unwrap();
-                let location3d = match state.edit_state {
-                    Edit::EditX => Vector3::new(new_point_3d.x, last_point_3d.y, last_point_3d.z),
-                    Edit::EditY => Vector3::new(last_point_3d.x, new_point_3d.y, last_point_3d.z),
-                    Edit::EditZ => Vector3::new(last_point_3d.x, last_point_3d.y, new_point_3d.z),
-                    _ => new_point_3d,
-                };
-                self.draw_lines.borrow_mut().push(location3d);
-                self.draw_lines_cache.clear();
-                self.draw_cache.clear();
-                state.draw = false;
+                match &state.edit_state {
+                    Edit::Extrude(_axis) => {
+                        self.draw_lines.borrow_mut().push(new_point_3d);
+                        self.draw_lines_cache.clear();
+                        self.draw_cache.clear();
+                        state.edit_state = Edit::Draw;
+                    }
+                    Edit::Scale(_axis) => {
+                        self.custom_scale.borrow_mut().replace(new_point_3d);
+                        self.draw_lines_cache.clear();
+                        self.draw_cache.clear();
+                        state.edit_state = Edit::Draw;
+                    }
+                    _ => (),
+                }
                 (Status::Ignored, None)
             }
             Event::Mouse(mouse::Event::CursorMoved { position: _ }) => {
-                if state.draw {
-                    self.draw_cache.clear();
-                }
+                match state.edit_state {
+                    Edit::Extrude(_) | Edit::Scale(_) => self.draw_cache.clear(),
+                    _ => (),
+                };
                 (Status::Ignored, None)
             }
             Event::Keyboard(keyboard::Event::KeyPressed { key, .. }) => {
                 if let Key::Character(c) = key {
                     let c = c.as_str();
                     match c {
-                        "r" => state.edit_state = Edit::EditX,
-                        "s" => state.edit_state = Edit::EditY,
-                        "t" => state.edit_state = Edit::EditZ,
+                        "x" => state.edit_state = Edit::Scale(EditAxis::None),
+                        "r" => match state.edit_state {
+                            Edit::Extrude(_) => state.edit_state = Edit::Extrude(EditAxis::EditX),
+                            Edit::Scale(_) => state.edit_state = Edit::Scale(EditAxis::EditX),
+                            _ => (),
+                        },
+                        "s" => match state.edit_state {
+                            Edit::Extrude(_) => state.edit_state = Edit::Extrude(EditAxis::EditY),
+                            Edit::Scale(_) => state.edit_state = Edit::Scale(EditAxis::EditY),
+                            _ => (),
+                        },
+                        "t" => match state.edit_state {
+                            Edit::Extrude(_) => state.edit_state = Edit::Extrude(EditAxis::EditZ),
+                            Edit::Scale(_) => state.edit_state = Edit::Scale(EditAxis::EditZ),
+                            _ => (),
+                        },
+                        "c" => state.edit_state = Edit::Extrude(EditAxis::None),
+                        "d" => {
+                            if self.draw_lines.borrow().len() > 1 {
+                                self.draw_lines.borrow_mut().pop();
+                                self.draw_lines_cache.clear();
+                                self.draw_cache.clear();
+                            }
+                            state.edit_state = Edit::Draw
+                        }
                         _ => state.edit_state = Edit::Draw,
                     }
                     self.draw_cache.clear();
@@ -164,7 +213,7 @@ where
         let draw_lines_cache = self
             .draw_lines_cache
             .draw(renderer, bounds.size(), |frame| {
-                let points: Vec<Point> = self
+                *state.points.borrow_mut() = self
                     .draw_lines
                     .borrow()
                     .iter()
@@ -173,23 +222,29 @@ where
                     .collect();
 
                 let mut builder = canvas::path::Builder::new();
-                points.windows(2).enumerate().for_each(|(index, items)| {
-                    let start = items[0];
-                    let end = items[1];
-                    builder.move_to(start);
-                    builder.line_to(end);
-                    let location3d = *self.draw_lines.borrow().get(index + 1).unwrap();
-                    frame.fill_text(Text {
-                        content: format!(
-                            "{:>7.2},{:>7.2},{:>7.2}",
-                            location3d.x, location3d.y, location3d.z
-                        ),
-                        position: Point::new(end.x + 4.0, end.y + 4.0),
-                        color: Color::from_rgba(0.8, 0.8, 0.8, 0.8),
-                        size: Pixels(10.0),
-                        ..Default::default()
+                state
+                    .points
+                    .borrow()
+                    .windows(2)
+                    .enumerate()
+                    .for_each(|(index, items)| {
+                        let start = items[0];
+                        let end = items[1];
+                        builder.move_to(start);
+                        builder.line_to(end);
+                        let location3d = *self.draw_lines.borrow().get(index + 1).unwrap();
+
+                        frame.fill_text(Text {
+                            content: format!(
+                                "{:>7.2},{:>7.2},{:>7.2}",
+                                location3d.x, location3d.y, location3d.z
+                            ),
+                            position: Point::new(end.x + 4.0, end.y + 4.0),
+                            color: Color::from_rgba(0.8, 0.8, 0.8, 0.8),
+                            size: Pixels(10.0),
+                            ..Default::default()
+                        });
                     });
-                });
 
                 let path = builder.build();
                 frame.stroke(
@@ -203,33 +258,84 @@ where
             });
 
         let draw_cache = self.draw_cache.draw(renderer, bounds.size(), |frame| {
-            if !state.draw {
-                return;
+            if let Some(item) = state.points.borrow().get(state.selected) {
+                let mut builder = canvas::path::Builder::new();
+                builder.circle(*item, 5.0);
+                let path = builder.build();
+                frame.stroke(
+                    &path,
+                    Stroke {
+                        style: canvas::Style::Solid(Color::from_rgba(0.8, 0.8, 0.2, 0.8)),
+                        width: 2.0,
+                        ..Stroke::default()
+                    },
+                );
+            };
+            if let Some(custom_scale_segment) = self.custom_scale_segment.borrow().as_ref() {
+                state
+                    .points
+                    .borrow()
+                    .windows(2)
+                    .enumerate()
+                    .filter(|(index, _items)| index == custom_scale_segment)
+                    .for_each(|(_index, items)| {
+                        let mut builder = canvas::path::Builder::new();
+                        let start = items[0];
+                        let end = items[1];
+                        builder.move_to(start);
+                        builder.line_to(end);
+                        let path = builder.build();
+                        frame.stroke(
+                            &path,
+                            Stroke {
+                                style: canvas::Style::Solid(Color::from_rgba(0.8, 0.8, 0.2, 0.8)),
+                                width: 2.0,
+                                ..Stroke::default()
+                            },
+                        );
+                    });
             }
+            if let Edit::Draw = state.edit_state {
+                if let Some(end) = *self.custom_scale.borrow() {
+                    let start = *state.points.borrow().get(state.selected).unwrap();
+                    let end = self
+                        .calculate_location_position_to_2d(state, bounds, &end)
+                        .unwrap();
+                    let end = Point::new(end.x, end.y);
+                    let mut builder = canvas::path::Builder::new();
+                    builder.move_to(start);
+                    builder.line_to(end);
+                    let path = builder.build();
+                    frame.stroke(
+                        &path,
+                        Stroke {
+                            style: canvas::Style::Solid(Color::from_rgba(0.2, 0.8, 0.2, 0.8)),
+                            width: 2.0,
+                            ..Stroke::default()
+                        },
+                    );
+                }
+            }
+
             let Some(cursor) = cursor.position() else {
                 return;
             };
             let cursor = cursor - bounds.position();
 
-            let Some(new_point_3d) = self.calculate_cursor_position_to_3d(state, bounds, &cursor)
+            let Some((new_point_3d, last_point_3d, color)) =
+                self.extract_last_point_details_for_mode(state, bounds, &cursor)
             else {
                 return;
-            };
-            let last_point_3d = &self.draw_lines.borrow().last().unwrap().clone();
-            let location3d = match state.edit_state {
-                Edit::EditX => Vector3::new(new_point_3d.x, last_point_3d.y, last_point_3d.z),
-                Edit::EditY => Vector3::new(last_point_3d.x, new_point_3d.y, last_point_3d.z),
-                Edit::EditZ => Vector3::new(last_point_3d.x, last_point_3d.y, new_point_3d.z),
-                _ => new_point_3d,
             };
 
             let Some(last_point) =
-                self.calculate_location_position_to_2d(state, bounds, last_point_3d)
+                self.calculate_location_position_to_2d(state, bounds, &last_point_3d)
             else {
                 return;
             };
+
             let Some(new_point) =
-                self.calculate_location_position_to_2d(state, bounds, &location3d)
+                self.calculate_location_position_to_2d(state, bounds, &new_point_3d)
             else {
                 return;
             };
@@ -238,10 +344,10 @@ where
             frame.fill_text(Text {
                 content: format!(
                     "{:>5.2},\n{:>5.2},\n{:>5.2}",
-                    location3d.x, location3d.y, location3d.z
+                    new_point_3d.x, new_point_3d.y, new_point_3d.z
                 ),
-                position: Point::new(cursor.x + 8.0, cursor.y + 8.0),
-                color: Color::from_rgba(0.8, 0.8, 0.8, 0.8),
+                position: Point::new(new_point.x + 8.0, new_point.y + 8.0),
+                color,
                 size: Pixels(12.0),
                 ..Default::default()
             });
@@ -252,13 +358,44 @@ where
             frame.stroke(
                 &path,
                 Stroke {
-                    style: canvas::Style::Solid(Color::from_rgba(0.8, 0.8, 0.8, 0.8)),
+                    style: canvas::Style::Solid(color),
                     width: 1.5,
                     ..Stroke::default()
                 },
             );
         });
         vec![draw_lines_cache, draw_cache]
+    }
+
+    fn extract_last_point_details_for_mode<'b>(
+        &self,
+        state: &'b State,
+        bounds: Rectangle,
+        cursor: &'b Vector,
+    ) -> Option<(Vector3<f32>, Vector3<f32>, Color)> {
+        let (axis, last_point_3d, color) = match &state.edit_state {
+            Edit::Extrude(axis) => {
+                let last_point_3d = *self.draw_lines.borrow().last().unwrap();
+                (axis, last_point_3d, Color::from_rgba(0.8, 0.8, 0.8, 0.8))
+            }
+            Edit::Scale(axis) => {
+                let last_point_3d = *self.draw_lines.borrow().get(state.selected).unwrap();
+                (axis, last_point_3d, Color::from_rgba(0.8, 0.8, 0.2, 0.8))
+            }
+            _ => {
+                return None;
+            }
+        };
+
+        let new_point_3d = self.calculate_cursor_position_to_3d(state, bounds, cursor)?;
+
+        let new_point_3d = match axis {
+            EditAxis::EditX => Vector3::new(new_point_3d.x, last_point_3d.y, last_point_3d.z),
+            EditAxis::EditY => Vector3::new(last_point_3d.x, new_point_3d.y, last_point_3d.z),
+            EditAxis::EditZ => Vector3::new(last_point_3d.x, last_point_3d.y, new_point_3d.z),
+            _ => new_point_3d,
+        };
+        Some((new_point_3d, last_point_3d, color))
     }
 
     fn calculate_cursor_position_to_3d(
@@ -292,10 +429,12 @@ where
 
         let point3d2 = Point3::from_homogeneous(point).unwrap();
         let last_point = self.draw_lines.borrow().last().cloned().unwrap();
-        let axis = if let Edit::EditZ = state.edit_state {
-            Vector3::new(1.0, 0.0, 0.0)
-        } else {
-            Vector3::new(0.0, 0.0, 1.0)
+
+        let axis = match state.edit_state {
+            Edit::Extrude(EditAxis::EditZ) | Edit::Scale(EditAxis::EditZ) => {
+                Vector3::new(1.0, 0.0, 0.0)
+            }
+            _ => Vector3::new(0.0, 0.0, 1.0),
         };
         let intersection1_3d =
             line_insert_with_plane(&last_point, &axis, &point3d1.coords, &point3d2.coords);
@@ -329,6 +468,23 @@ where
 
         Some(dc_to_image.transform_point(&point.xy()).coords)
     }
+}
+
+pub fn check_if_point_is_from_line_new(
+    line_point_a: &Point,
+    line_point_b: &Point,
+    point: Point,
+) -> bool {
+    // https://en.wikipedia.org/wiki/Distance_from_a_point_to_a_line
+    // Line defined by two points
+    let error = ((line_point_b.y - line_point_a.y) * point.x
+        - (line_point_b.x - line_point_a.x) * point.y
+        + line_point_b.x * line_point_a.y
+        - line_point_b.y * line_point_a.x)
+        .abs()
+        / ((line_point_b.y - line_point_a.y).powi(2) + (line_point_b.x - line_point_a.x).powi(2))
+            .sqrt();
+    error < 3.0
 }
 
 impl<'a, Message, Theme, Renderer> Widget<Message, Theme, Renderer>
@@ -412,6 +568,11 @@ where
         //let bounds = layout.bounds();
         //let state = tree.state.downcast_ref::<State>();
         //self.program.mouse_interaction(state, bounds, cursor)
+        //match state.edit_state {
+        //    Edit::Extrude(_) => mouse::Interaction::Crosshair,
+        //    Edit::Scale(_) => mouse::Interaction::ZoomOut,
+        //    _ => mouse::Interaction::default(),
+        //}
         mouse::Interaction::default()
     }
 
@@ -452,7 +613,7 @@ pub struct State {
     pub image_path: String,
     pub mouse3d_position: Vector3<f32>,
     pub edit_state: Edit,
-    pub draw: bool,
+    pub points: RefCell<Vec<Point>>,
 }
 
 impl<'a, Message, Theme, Renderer> From<DrawLine<'a, Message, Theme, Renderer>>

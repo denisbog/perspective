@@ -25,7 +25,7 @@ pub struct Lines {
     pub points: Option<Vec<StorePoint3d>>,
     pub flip: Option<[bool; 3]>,
     pub custom_origin_tanslation: Option<StorePoint3d>,
-    pub custom_scale: Option<StorePoint3d>,
+    pub custom_scale: Option<f32>,
 }
 #[derive(Serialize, Deserialize)]
 pub struct StoreLine {
@@ -91,9 +91,7 @@ pub fn read_points_from_file(points: &String) -> Result<(AxisData, Option<Vec<Ve
         .custom_origin_tanslation
         .map(|item| Vector3::new(item.x, item.y, item.z));
 
-    let custom_scale = data
-        .custom_scale
-        .map(|item| Vector3::new(item.x, item.y, item.z));
+    let custom_scale = data.custom_scale;
 
     Ok((
         AxisData {
@@ -149,7 +147,7 @@ pub fn compute_ui_adapter(
     control_point: &Point,
     flip: (bool, bool, bool),
     translate_origin: &Option<Vector3<f32>>,
-    scale: &Option<Vector3<f32>>,
+    scale: &Option<f32>,
 ) -> Result<ComputeSolution> {
     let points: [Vector2<f32>; 12] = [
         Vector2::new(x_lines[0].0.x, x_lines[0].0.y),
@@ -193,7 +191,7 @@ pub fn compute_ui_adapter(
 
     let compute_solution = if let Ok(compute_solution) = compute_solution {
         if let Some(scale) = scale {
-            compute_camera_pose_scale(compute_solution, scale)
+            compute_camera_pose_scale(compute_solution, *scale)
         } else {
             Ok(compute_solution)
         }
@@ -213,10 +211,9 @@ pub fn compute_ui_adapter(
 
 pub fn compute_camera_pose_scale(
     mut compute_solution: ComputeSolution,
-    scale_segment: &Vector3<f32>,
+    scale: f32,
 ) -> Result<ComputeSolution> {
-    let distance = scale_segment.norm();
-    compute_solution.view_transform *= Matrix4::new_scaling(distance);
+    compute_solution.view_transform *= Matrix4::new_scaling(scale);
     Ok(compute_solution)
 }
 
