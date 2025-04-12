@@ -6,7 +6,6 @@ use nalgebra::{Matrix3, Matrix4, Point2, RowVector3, Vector2, Vector3};
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio_util::{bytes::BytesMut, codec::Encoder};
-use tracing::trace;
 
 use crate::{
     AxisData, FSpyData, SceneSettings, encoder::FSpyEncoder,
@@ -48,7 +47,6 @@ impl From<&(Point, Point)> for StoreLine {
 }
 
 pub fn read_points_from_file(points: &String) -> Result<(AxisData, Option<Vec<Vector3<f32>>>)> {
-    trace!("reading points from file {points}");
     let mut file = File::open(points)?;
     let mut content = String::new();
     file.read_to_string(&mut content)?;

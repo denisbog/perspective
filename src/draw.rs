@@ -375,11 +375,11 @@ where
     ) -> Option<(Vector3<f32>, Vector3<f32>, Color)> {
         let (axis, last_point_3d, color) = match &state.edit_state {
             Edit::Extrude(axis) => {
-                let last_point_3d = *self.draw_lines.borrow().last().unwrap();
+                let last_point_3d = *self.draw_lines.borrow().last()?;
                 (axis, last_point_3d, Color::from_rgba(0.8, 0.8, 0.8, 0.8))
             }
             Edit::Scale(axis) => {
-                let last_point_3d = *self.draw_lines.borrow().get(state.selected).unwrap();
+                let last_point_3d = *self.draw_lines.borrow().get(state.selected)?;
                 (axis, last_point_3d, Color::from_rgba(0.8, 0.8, 0.2, 0.8))
             }
             _ => {
@@ -419,17 +419,23 @@ where
         *matrix.index_mut((1, 2)) = -compute_solution.ortho_center.y;
 
         let model_view_projection = matrix * compute_solution.view_transform;
-        let model_view_projection = model_view_projection.try_inverse().unwrap();
+        let model_view_projection = model_view_projection.try_inverse()?;
         let last_point_axis = Vector3::zeros();
         let point = model_view_projection * Point3::from(last_point_axis).to_homogeneous();
-        let point3d1 = Point3::from_homogeneous(point).unwrap();
+        let point3d1 = Point3::from_homogeneous(point)?;
 
         let point = Point3::new(click_location.x, click_location.y, 1.0).to_homogeneous();
         let point = model_view_projection * point;
 
-        let point3d2 = Point3::from_homogeneous(point).unwrap();
-        let last_point = self.draw_lines.borrow().last().cloned().unwrap();
+        let point3d2 = Point3::from_homogeneous(point)?;
 
+        let last_point = if let Edit::Scale(_) = state.edit_state {
+            self.custom_origin_translation
+                .borrow()
+                .unwrap_or_else(|| self.draw_lines.borrow().last().cloned().unwrap_or_default())
+        } else {
+            self.draw_lines.borrow().last().cloned()?
+        };
         let axis = match state.edit_state {
             Edit::Extrude(EditAxis::EditZ) | Edit::Scale(EditAxis::EditZ) => {
                 Vector3::new(1.0, 0.0, 0.0)
@@ -464,7 +470,7 @@ where
         let point = Point3::from(*location3d);
 
         let point = transform * point.to_homogeneous();
-        let point = Point3::from_homogeneous(point).unwrap();
+        let point = Point3::from_homogeneous(point)?;
 
         Some(dc_to_image.transform_point(&point.xy()).coords)
     }

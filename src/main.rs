@@ -1,6 +1,5 @@
 use ::image::ImageReader;
 use clap::{Parser, command};
-use iced::alignment::Horizontal;
 use iced::futures::executor::block_on;
 use nalgebra::Vector3;
 use perspective::AxisData;
@@ -254,7 +253,6 @@ impl Perspective {
                     .unwrap()
                     .borrow_mut()
                     .custom_origin_translation = Some(custom_origin_translation);
-                self.custom_origin_translation.replace(None);
                 self.update(Message::CalculatePose);
             }
             Message::ResetTranslation => {
@@ -268,7 +266,13 @@ impl Perspective {
                 let Some(custom_scale) = *self.custom_scale_vector.borrow() else {
                     return;
                 };
-                let custom_scale = custom_scale - self.custom_origin_translation.borrow().unwrap();
+
+                let custom_scale =
+                    if let Some(custom_origin_scale) = *self.custom_origin_translation.borrow() {
+                        custom_scale - custom_origin_scale
+                    } else {
+                        custom_scale
+                    };
                 let scale = if let Some(custom_scale_segment) = *self.custom_scale_segment.borrow()
                 {
                     let start = *self.draw_lines.borrow().get(custom_scale_segment).unwrap();
@@ -282,9 +286,15 @@ impl Perspective {
                 } else {
                     1.0
                 };
-                self.axis_data.as_ref().unwrap().borrow_mut().custom_scale =
-                    Some(custom_scale.norm() / scale);
-
+                let scale = custom_scale.norm() / scale;
+                let scale = if let Some(prev_scale) =
+                    self.axis_data.as_ref().unwrap().borrow().custom_scale
+                {
+                    prev_scale * scale
+                } else {
+                    scale
+                };
+                self.axis_data.as_ref().unwrap().borrow_mut().custom_scale = Some(scale);
                 self.custom_scale_vector.replace(None);
                 self.custom_scale_segment.replace(None);
                 self.update(Message::CalculatePose);
@@ -507,12 +517,11 @@ impl Perspective {
                             .on_press_with(move || Message::SelectImage(index as u8))
                             .into()
                         }))
-                        .spacing(10)
+                        .padding(20)
+                        .spacing(20)
                     )
                 )
                 .width(300)
-                .spacing(10)
-                .align_x(Horizontal::Right),
             )
             .height(Length::Fill)
             .padding(20),
