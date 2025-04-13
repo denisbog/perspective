@@ -15,7 +15,7 @@ use iced::{
     event::{self, Status},
     widget::canvas::{self, Event, Stroke, Text},
 };
-use nalgebra::{Matrix3, Perspective3, Vector2, Vector3};
+use nalgebra::{Matrix3, Perspective3, Point2, Vector2, Vector3};
 
 use crate::{
     AxisData, Component, Edit,
@@ -429,6 +429,28 @@ where
                     color_blue,
                     transform,
                     dc_to_image,
+                );
+                let yellow = Color::new(0.8, 0.8, 0.2, 0.8);
+                let orthor_center =
+                    dc_to_image * Point2::from(compute_solution.ortho_center.xy()).to_homogeneous();
+
+                let mut builder = canvas::path::Builder::new();
+                let point = Point::new(orthor_center.x, orthor_center.y);
+                builder.circle(point, 5.0);
+                builder.move_to(point);
+
+                let orthor_center = dc_to_image * Point2::origin().to_homogeneous();
+                let point = Point::new(orthor_center.x, orthor_center.y);
+                builder.line_to(point);
+                builder.circle(point, 3.0);
+                let path = builder.build();
+                frame.stroke(
+                    &path,
+                    Stroke {
+                        style: canvas::Style::Solid(yellow),
+                        width: 2.0,
+                        ..Stroke::default()
+                    },
                 );
             }
         });
