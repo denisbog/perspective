@@ -13,6 +13,7 @@ use iced::{
         },
     },
     event::{self, Status},
+    mouse::ScrollDelta,
     widget::canvas::{self, Event, Stroke, Text},
 };
 use nalgebra::{Matrix3, Perspective3, Point2, Vector2, Vector3};
@@ -146,6 +147,45 @@ where
         let cursor = cursor - bounds.position();
         let scale_cursor = scale_point(cursor, bounds.size());
         match event {
+            Event::Keyboard(iced::keyboard::Event::ModifiersChanged(modifiers)) => {
+                state.is_y = modifiers.control();
+                state.is_alt = modifiers.alt();
+                (Status::Ignored, None)
+            }
+
+            Event::Mouse(mouse::Event::WheelScrolled {
+                delta: ScrollDelta::Lines { x: _x, y },
+            }) => {
+                if let Some(component_to_edit) = &state.edit {
+                    let delta = y / 10000.0;
+                    match component_to_edit {
+                        Component::A => {
+                            if state.is_y {
+                                self.axis_data.borrow_mut().axis_lines[state.highlight.unwrap()]
+                                    .0
+                                    .y += delta;
+                            } else {
+                                self.axis_data.borrow_mut().axis_lines[state.highlight.unwrap()]
+                                    .0
+                                    .x += delta;
+                            }
+                        }
+                        Component::B => {
+                            if state.is_y {
+                                self.axis_data.borrow_mut().axis_lines[state.highlight.unwrap()]
+                                    .1
+                                    .y += delta;
+                            } else {
+                                self.axis_data.borrow_mut().axis_lines[state.highlight.unwrap()]
+                                    .1
+                                    .x += delta;
+                            }
+                        }
+                    };
+                    self.cache.clear();
+                }
+                (Status::Ignored, None)
+            }
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                 match &state.edit_state {
                     Edit::ControlPoint => {
@@ -225,12 +265,16 @@ where
                     if state.is_second_point {
                         (Status::Captured, Some(CameraPoseMessage::DragLine))
                     } else {
-                        (
-                            Status::Captured,
-                            Some(CameraPoseMessage::EditEndpoint {
-                                cursor: scale_cursor,
-                            }),
-                        )
+                        if !state.is_alt {
+                            (
+                                Status::Captured,
+                                Some(CameraPoseMessage::EditEndpoint {
+                                    cursor: scale_cursor,
+                                }),
+                            )
+                        } else {
+                            (Status::Ignored, None)
+                        }
                     }
                 }
                 _ => (Status::Ignored, None),
@@ -431,11 +475,11 @@ where
                     dc_to_image,
                 );
                 let yellow = Color::new(0.8, 0.8, 0.2, 0.8);
-                let orthor_center =
+                let ortho_center =
                     dc_to_image * Point2::from(compute_solution.ortho_center.xy()).to_homogeneous();
 
                 let mut builder = canvas::path::Builder::new();
-                let point = Point::new(orthor_center.x, orthor_center.y);
+                let point = Point::new(ortho_center.x, ortho_center.y);
                 builder.circle(point, 5.0);
                 builder.move_to(point);
 
@@ -577,6 +621,8 @@ pub struct State {
     pub image_path: String,
     pub mouse3d_position: Vector3<f32>,
     pub edit_state: Edit,
+    pub is_y: bool,
+    pub is_alt: bool,
 }
 
 impl<'a, Message, Theme, Renderer> From<ComputeCameraPose<'a, Message, Theme, Renderer>>

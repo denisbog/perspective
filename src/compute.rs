@@ -407,3 +407,11 @@ pub fn relative_to_image_plane(ratio: f32, image_point: &Vector2<f32>) -> Vector
     let point = Point2::from(*image_point).to_homogeneous();
     Point2::from_homogeneous(transform * point).unwrap().coords
 }
+// corner up left: 0,0; bottom right: size.width, size.height;
+pub fn to_canvas(bounds: Size, image_point: &Vector2<f32>) -> Vector2<f32> {
+    let transform =
+        Matrix3::new_nonuniform_scaling(&Vector2::new(bounds.width / 2.0, bounds.width / -2.0))
+            .append_translation(&Vector2::new(bounds.width / 2.0, bounds.height / 2.0));
+    let point = Point2::from(*image_point).to_homogeneous();
+    Point2::from_homogeneous(transform * point).unwrap().coords
+}

@@ -10,7 +10,13 @@ use iced::widget::canvas::Text;
 use iced::widget::canvas::stroke::Stroke;
 use num_traits::ToPrimitive;
 
-use crate::{Edit, compute::find_vanishing_point_for_lines, utils::scale_point_to_canvas};
+use crate::{
+    Edit,
+    compute::{
+        find_vanishing_point_for_lines, relative_to_image_plane, to_canvas, triangle_ortho_center,
+    },
+    utils::scale_point_to_canvas,
+};
 
 pub fn draw_vanishing_points<Renderer>(
     control_point: &Point,
@@ -69,6 +75,37 @@ pub fn draw_vanishing_points<Renderer>(
         Stroke {
             style,
             width: 1.0,
+            ..Stroke::default()
+        },
+    );
+
+    //   let ortho_center =
+    //       triangle_ortho_center(&vanishing_point_x, &vanishing_point_y, &vanishing_point_z);
+    //   trace!("{:?}", ortho_center);
+    let ratio = bounds.width / bounds.height;
+    let ortho_center = triangle_ortho_center(
+        &relative_to_image_plane(ratio, &vanishing_point_x),
+        &relative_to_image_plane(ratio, &vanishing_point_y),
+        &relative_to_image_plane(ratio, &vanishing_point_z),
+    );
+    let ortho_center = to_canvas(bounds.size(), &ortho_center);
+    let yellow = Color::new(0.8, 0.8, 0.2, 0.8);
+
+    let mut builder = canvas::path::Builder::new();
+
+    let point = Point::new(ortho_center.x, ortho_center.y);
+    builder.circle(point, 5.0);
+    builder.move_to(point);
+
+    let point = Point::new(bounds.size().width / 2.0, bounds.size().height / 2.0);
+    builder.line_to(point);
+    builder.circle(point, 3.0);
+    let path = builder.build();
+    frame.stroke(
+        &path,
+        Stroke {
+            style: canvas::Style::Solid(yellow),
+            width: 2.0,
             ..Stroke::default()
         },
     );
