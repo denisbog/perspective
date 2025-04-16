@@ -1,10 +1,11 @@
 use ::image::ImageReader;
 use clap::{Parser, command};
 use iced::futures::executor::block_on;
-use nalgebra::Vector3;
-use perspective::AxisData;
+use nalgebra::{Vector2, Vector3};
 use perspective::camera_pose::ComputeCameraPose;
 use perspective::draw::DrawLine;
+use perspective::optimize::ortho_center_optimize;
+use perspective::{AxisData, EditAxis};
 use std::cell::RefCell;
 use std::fs::File;
 use std::io::Write;
@@ -15,7 +16,7 @@ use zoomer::ZoomViewer;
 use iced::Alignment::Center;
 use iced::Length::Fill;
 use iced::widget::{button, center, column, image, row, scrollable, slider, stack, text};
-use iced::{Element, Length, Size, Task, Theme};
+use iced::{Element, Length, Point, Size, Task, Theme};
 use perspective::compute::{
     ComputeSolution, Lines, StoreLine, StorePoint, StorePoint3d, compute_ui_adapter,
     read_points_from_file, store_scene_data_to_file,
@@ -57,6 +58,7 @@ enum UiMod {
 #[derive(Debug, Clone)]
 enum Message {
     Save,
+    LoadLines,
     CalculatePose,
     LoadApplicationState {
         image_data: Option<ImageData>,
@@ -70,6 +72,7 @@ enum Message {
     ResetTranslation,
     ChangeMode(UiMod),
     ExportToFSpy,
+    Optimize,
 }
 
 #[derive(Default)]
@@ -87,6 +90,11 @@ struct Perspective {
     custom_origin_translation: Rc<RefCell<Option<Vector3<f32>>>>,
     custom_scale_vector: Rc<RefCell<Option<Vector3<f32>>>>,
     custom_scale_segment: Rc<RefCell<Option<usize>>>,
+    custom_scale_2d: Rc<RefCell<Option<Vector2<f32>>>>,
+    custom_scale_axis: Rc<RefCell<Option<EditAxis>>>,
+    custom_error_vector: Rc<RefCell<Option<Vector3<f32>>>>,
+    custom_error_2d: Rc<RefCell<Option<Vector2<f32>>>>,
+    custom_error_axis: Rc<RefCell<Option<EditAxis>>>,
 }
 #[derive(Debug, Clone)]
 struct ImageData {
@@ -165,6 +173,15 @@ impl Perspective {
                 };
                 let out = <Lines as From<&Perspective>>::from(self);
                 file.write_all(&serde_json::to_vec(&out).unwrap()).unwrap();
+            }
+            Message::LoadLines => {
+                if self.axis_data.is_none() {
+                    return;
+                };
+                if let Ok((_, Some(lines))) = read_points_from_file(&self.points_file_name.clone())
+                {
+                    *self.draw_lines.borrow_mut() = lines;
+                };
             }
             Message::CalculatePose => {
                 let Some(axis_data) = &self.axis_data else {
@@ -322,6 +339,32 @@ impl Perspective {
                     trace!("scene data: {:?}", data);
                 });
             }
+            Message::Optimize => {
+                let Some(axis_data) = &self.axis_data else {
+                    return;
+                };
+                let lines = axis_data
+                    .borrow()
+                    .axis_lines
+                    .iter()
+                    .cloned()
+                    .flat_map(|(a, b)| [Vector2::new(a.x, a.y), Vector2::new(b.x, b.y)])
+                    .collect();
+                if let Ok(lines) =
+                    ortho_center_optimize(self.image_size.width / self.image_size.height, lines)
+                {
+                    axis_data.borrow_mut().axis_lines = lines
+                        .chunks(2)
+                        .map(|items| {
+                            (
+                                Point::new(items[0].x, items[0].y),
+                                Point::new(items[1].x, items[1].y),
+                            )
+                        })
+                        .collect();
+                    self.update(Message::CalculatePose);
+                };
+            }
         }
     }
     fn view(&self) -> Element<Message> {
@@ -340,6 +383,11 @@ impl Perspective {
                 Rc::clone(&self.custom_origin_translation),
                 Rc::clone(&self.custom_scale_vector),
                 Rc::clone(&self.custom_scale_segment),
+                Rc::clone(&self.custom_scale_2d),
+                Rc::clone(&self.custom_scale_axis),
+                Rc::clone(&self.custom_error_vector),
+                Rc::clone(&self.custom_error_2d),
+                Rc::clone(&self.custom_error_axis),
             )
             .image_size(self.image_size)
             .width(Length::Fill)
@@ -351,6 +399,11 @@ impl Perspective {
                 Rc::clone(&self.custom_origin_translation),
                 Rc::clone(&self.custom_scale_vector),
                 Rc::clone(&self.custom_scale_segment),
+                Rc::clone(&self.custom_scale_2d),
+                Rc::clone(&self.custom_scale_axis),
+                Rc::clone(&self.custom_error_vector),
+                Rc::clone(&self.custom_error_2d),
+                Rc::clone(&self.custom_error_axis),
             )
             .image_size(self.image_size)
             .width(Length::Fill)
@@ -364,6 +417,11 @@ impl Perspective {
                 Rc::clone(&self.custom_origin_translation),
                 Rc::clone(&self.custom_scale_vector),
                 Rc::clone(&self.custom_scale_segment),
+                Rc::clone(&self.custom_scale_2d),
+                Rc::clone(&self.custom_scale_axis),
+                Rc::clone(&self.custom_error_vector),
+                Rc::clone(&self.custom_error_2d),
+                Rc::clone(&self.custom_error_axis),
             )
             .image_size(self.image_size)
             .width(Length::Fill)
@@ -426,6 +484,7 @@ impl Perspective {
                         .into(),
                 );
                 buttons.push(button("Save lines").on_press(Message::Save).into());
+                buttons.push(button("Optimize").on_press(Message::Optimize).into());
             }
             UiMod::Scale => {
                 buttons.push(
@@ -463,6 +522,7 @@ impl Perspective {
                         .into(),
                 );
                 buttons.push(button("Save lines").on_press(Message::Save).into());
+                buttons.push(button("Load lines").on_press(Message::LoadLines).into());
             }
             UiMod::Draw => {
                 buttons.push(
@@ -476,6 +536,7 @@ impl Perspective {
                         .into(),
                 );
                 buttons.push(button("Save lines").on_press(Message::Save).into());
+                buttons.push(button("Load lines").on_press(Message::LoadLines).into());
             }
             UiMod::Try => {
                 buttons.push(
@@ -588,10 +649,14 @@ impl From<&Perspective> for Lines {
 mod tests {
     use anyhow::Result;
     use nalgebra::{Matrix3, RowVector3, Vector2};
-    use perspective::compute::{
-        compute_camera_pose, compute_camera_pose_scale, find_vanishing_point_for_lines,
-        relative_to_image_plane, store_scene_data_to_file,
+    use perspective::{
+        compute::{
+            compute_camera_pose, compute_camera_pose_scale, find_vanishing_point_for_lines,
+            relative_to_image_plane, store_scene_data_to_file,
+        },
+        optimize::ortho_center_optimize,
     };
+    use tracing::trace;
     use tracing_subscriber::EnvFilter;
 
     #[tokio::test]
@@ -651,6 +716,91 @@ mod tests {
         )
         .await
         .unwrap();
+        Ok(())
+    }
+    #[tokio::test]
+    async fn optimize() -> Result<()> {
+        tracing_subscriber::fmt()
+            .with_env_filter(EnvFilter::from_default_env())
+            .init();
+
+        //{ position: [0.6746836, 0.5918425,
+        //0.8013924, 0.5004782,
+        //0.50898737, 0.11926863,
+        //0.64367086, 0.078312226,
+        //0.6596202, 0.5918425,
+        //0.52405065, 0.5130802,
+        //0.65607595, 0.08146272,
+        //0.7748101, 0.11139241,
+        //0.66759497, 0.5571871,
+        //0.67556965, 0.19330521,
+        //0.5001266, 0.365007,
+        //0.5001266, 0.13344586
+        //], value: 0.08237194269895554 };
+        //{ position: [
+        //0.674654800662414, 0.5918025346293277,
+        //0.8014244290548542, 0.5005226472901101,
+        //0.5090072593877548, 0.11933393009034284,
+        //0.6436488917633901, 0.07824010065005475,
+        //0.6596201874083368, 0.5918425252953883,
+        //0.5240506641220501, 0.5130801695112077,
+        //0.6560593953908096, 0.081528506643735,
+        //0.7748254724952184, 0.11133131940359936,
+        //0.6674065474058676, 0.557182902397655,
+        //0.6757490690327026, 0.19330920746977442,
+        //0.5002829503818129, 0.3650070018465889,
+        //0.4999746487460301, 0.13344585823364694],
+        //value: 0.002081983194845036 }
+        //
+        //
+        //[0.6746548, 0.59180254,
+        //0.80142444, 0.5005227,
+        //0.5090073, 0.11933393,
+        //0.64364886, 0.078240104,
+        //0.65962017, 0.59184253,
+        //0.52405065, 0.5130802,
+        //0.6560594, 0.08152851,
+        //0.77482545, 0.11133132,
+        //0.66740656, 0.5571829,
+        //0.67574906, 0.1933092,
+        //0.50028294, 0.365007,
+        //0.49997464, 0.13344586]
+        //
+        //
+        //
+        //[0.6746521, 0.59179884,
+        //0.8014274, 0.5005268,
+        //0.5090096, 0.11934169,
+        //0.6436463, 0.078231536,
+        //0.65961885, 0.5918448,
+        //0.5240521, 0.51307774,
+        //0.6560569, 0.08153848,
+        //0.7748278, 0.11132205,
+        //0.66739833, 0.5571827,
+        //0.6757568, 0.19330938,
+        //0.5002778, 0.365007,
+        //0.49997953, 0.13344586]
+        //
+        let points = vec![
+            Vector2::new(0.6746836, 0.5918425),
+            Vector2::new(0.8013924, 0.5004782),
+            Vector2::new(0.50898737, 0.11926863),
+            Vector2::new(0.64367086, 0.078312226),
+            Vector2::new(0.6596202, 0.5918425),
+            Vector2::new(0.52405065, 0.5130802),
+            Vector2::new(0.65607595, 0.08146272),
+            Vector2::new(0.7748101, 0.11139241),
+            Vector2::new(0.66759497, 0.5571871),
+            Vector2::new(0.67556965, 0.19330521),
+            Vector2::new(0.5001266, 0.365007),
+            Vector2::new(0.5001266, 0.13344586),
+        ];
+
+        let image_width = 1920.0;
+        let image_height = 1080.0;
+        let ratio = image_width / image_height;
+        let points = ortho_center_optimize(ratio, points);
+        trace!("solution: {:?}", points);
         Ok(())
     }
 }

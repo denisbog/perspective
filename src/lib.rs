@@ -5,6 +5,7 @@ pub mod draw;
 pub mod draw_decoration;
 pub mod encoder;
 pub mod fspy;
+pub mod optimize;
 pub mod utils;
 use iced::Point;
 use nalgebra::Vector3;
@@ -60,6 +61,7 @@ pub enum Component {
 }
 #[derive(Default, Clone, Debug)]
 pub enum Edit {
+    MarkError(EditAxis),
     ControlPoint,
     Draw,
     Extrude(EditAxis),

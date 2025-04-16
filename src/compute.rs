@@ -391,7 +391,11 @@ pub struct ComputeSolution {
 }
 
 impl ComputeSolution {
-    fn new(view_transform: Matrix4<f32>, ortho_center: Vector2<f32>, focal_length: f32) -> Self {
+    pub fn new(
+        view_transform: Matrix4<f32>,
+        ortho_center: Vector2<f32>,
+        focal_length: f32,
+    ) -> Self {
         Self {
             view_transform,
             ortho_center,

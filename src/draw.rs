@@ -42,6 +42,11 @@ where
     custom_origin_translation: Rc<RefCell<Option<Vector3<f32>>>>,
     custom_scale: Rc<RefCell<Option<Vector3<f32>>>>,
     custom_scale_segment: Rc<RefCell<Option<usize>>>,
+    custom_scale_2d: Rc<RefCell<Option<Vector2<f32>>>>,
+    custom_scale_axis: Rc<RefCell<Option<EditAxis>>>,
+    custom_error: Rc<RefCell<Option<Vector3<f32>>>>,
+    custom_error_2d: Rc<RefCell<Option<Vector2<f32>>>>,
+    custom_error_axis: Rc<RefCell<Option<EditAxis>>>,
 }
 impl<'a, Message, Theme, Renderer> DrawLine<'a, Message, Theme, Renderer>
 where
@@ -54,6 +59,11 @@ where
         custom_origin_translation: Rc<RefCell<Option<Vector3<f32>>>>,
         custom_scale: Rc<RefCell<Option<Vector3<f32>>>>,
         custom_scale_segment: Rc<RefCell<Option<usize>>>,
+        custom_scale_2d: Rc<RefCell<Option<Vector2<f32>>>>,
+        custom_scale_axis: Rc<RefCell<Option<EditAxis>>>,
+        custom_error: Rc<RefCell<Option<Vector3<f32>>>>,
+        custom_error_2d: Rc<RefCell<Option<Vector2<f32>>>>,
+        custom_error_axis: Rc<RefCell<Option<EditAxis>>>,
     ) -> Self {
         Self {
             width: Length::Fixed(Self::DEFAULT_SIZE),
@@ -69,6 +79,11 @@ where
             custom_origin_translation,
             custom_scale,
             custom_scale_segment,
+            custom_scale_2d,
+            custom_scale_axis,
+            custom_error,
+            custom_error_2d,
+            custom_error_axis,
         }
     }
     pub fn width(mut self, width: impl Into<Length>) -> Self {
@@ -130,6 +145,18 @@ where
                             }
                         });
                 }
+                if let Edit::MarkError(_axis) = &state.edit_state {
+                    let cursor = Point::new(cursor.x, cursor.y);
+                    for (index, point) in state.points.borrow().iter().enumerate() {
+                        if cursor.distance(*point) < 10.0 {
+                            state.selected_error = Some(index);
+                            self.custom_error
+                                .replace(self.draw_lines.borrow().get(index).copied());
+                            self.draw_cache.clear();
+                            return (Status::Ignored, None);
+                        };
+                    }
+                }
                 (Status::Ignored, None)
             }
             Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
@@ -146,8 +173,22 @@ where
                         self.draw_cache.clear();
                         state.edit_state = Edit::Draw;
                     }
-                    Edit::Scale(_axis) => {
+                    Edit::Scale(axis) => {
                         self.custom_scale.borrow_mut().replace(new_point_3d);
+                        self.custom_scale_2d
+                            .borrow_mut()
+                            .replace(Vector2::new(cursor.x, cursor.y));
+                        self.custom_scale_axis.borrow_mut().replace(axis.clone());
+                        self.draw_lines_cache.clear();
+                        self.draw_cache.clear();
+                        state.edit_state = Edit::Draw;
+                    }
+                    Edit::MarkError(axis) => {
+                        self.custom_error.borrow_mut().replace(new_point_3d);
+                        self.custom_error_2d
+                            .borrow_mut()
+                            .replace(Vector2::new(cursor.x, cursor.y));
+                        self.custom_error_axis.borrow_mut().replace(axis.clone());
                         self.draw_lines_cache.clear();
                         self.draw_cache.clear();
                         state.edit_state = Edit::Draw;
@@ -158,7 +199,9 @@ where
             }
             Event::Mouse(mouse::Event::CursorMoved { position: _ }) => {
                 match state.edit_state {
-                    Edit::Extrude(_) | Edit::Scale(_) => self.draw_cache.clear(),
+                    Edit::Extrude(_) | Edit::Scale(_) | Edit::MarkError(_) => {
+                        self.draw_cache.clear()
+                    }
                     _ => (),
                 };
                 (Status::Ignored, None)
@@ -171,16 +214,25 @@ where
                         "r" => match state.edit_state {
                             Edit::Extrude(_) => state.edit_state = Edit::Extrude(EditAxis::EditX),
                             Edit::Scale(_) => state.edit_state = Edit::Scale(EditAxis::EditX),
+                            Edit::MarkError(_) => {
+                                state.edit_state = Edit::MarkError(EditAxis::EditX)
+                            }
                             _ => (),
                         },
                         "s" => match state.edit_state {
                             Edit::Extrude(_) => state.edit_state = Edit::Extrude(EditAxis::EditY),
                             Edit::Scale(_) => state.edit_state = Edit::Scale(EditAxis::EditY),
+                            Edit::MarkError(_) => {
+                                state.edit_state = Edit::MarkError(EditAxis::EditY)
+                            }
                             _ => (),
                         },
                         "t" => match state.edit_state {
                             Edit::Extrude(_) => state.edit_state = Edit::Extrude(EditAxis::EditZ),
                             Edit::Scale(_) => state.edit_state = Edit::Scale(EditAxis::EditZ),
+                            Edit::MarkError(_) => {
+                                state.edit_state = Edit::MarkError(EditAxis::EditZ)
+                            }
                             _ => (),
                         },
                         "c" => state.edit_state = Edit::Extrude(EditAxis::None),
@@ -192,6 +244,7 @@ where
                             }
                             state.edit_state = Edit::Draw
                         }
+                        "q" => state.edit_state = Edit::MarkError(EditAxis::None),
                         _ => state.edit_state = Edit::Draw,
                     }
                     self.draw_cache.clear();
@@ -295,6 +348,21 @@ where
                         );
                     });
             }
+            if let Some(selected_error) = state.selected_error {
+                if let Some(item) = state.points.borrow().get(selected_error) {
+                    let mut builder = canvas::path::Builder::new();
+                    builder.circle(*item, 5.0);
+                    let path = builder.build();
+                    frame.stroke(
+                        &path,
+                        Stroke {
+                            style: canvas::Style::Solid(Color::from_rgba(0.8, 0.2, 0.2, 0.8)),
+                            width: 2.0,
+                            ..Stroke::default()
+                        },
+                    );
+                };
+            }
             if let Edit::Draw = state.edit_state {
                 if let Some(end) = *self.custom_scale.borrow() {
                     let start = *state.points.borrow().get(state.selected).unwrap();
@@ -310,6 +378,29 @@ where
                         &path,
                         Stroke {
                             style: canvas::Style::Solid(Color::from_rgba(0.2, 0.8, 0.2, 0.8)),
+                            width: 2.0,
+                            ..Stroke::default()
+                        },
+                    );
+                }
+                if let Some(end) = *self.custom_error.borrow() {
+                    let start = *state
+                        .points
+                        .borrow()
+                        .get(state.selected_error.unwrap())
+                        .unwrap();
+                    let end = self
+                        .calculate_location_position_to_2d(state, bounds, &end)
+                        .unwrap();
+                    let end = Point::new(end.x, end.y);
+                    let mut builder = canvas::path::Builder::new();
+                    builder.move_to(start);
+                    builder.line_to(end);
+                    let path = builder.build();
+                    frame.stroke(
+                        &path,
+                        Stroke {
+                            style: canvas::Style::Solid(Color::from_rgba(0.8, 0.2, 0.2, 0.8)),
                             width: 2.0,
                             ..Stroke::default()
                         },
@@ -382,12 +473,17 @@ where
                 let last_point_3d = *self.draw_lines.borrow().get(state.selected)?;
                 (axis, last_point_3d, Color::from_rgba(0.8, 0.8, 0.2, 0.8))
             }
-            _ => {
+            Edit::MarkError(axis) => {
+                let last_point_3d = *self.draw_lines.borrow().get(state.selected_error?)?;
+                (axis, last_point_3d, Color::from_rgba(0.8, 0.2, 0.2, 0.8))
+            }
+            _w => {
                 return None;
             }
         };
 
-        let new_point_3d = self.calculate_cursor_position_to_3d(state, bounds, cursor)?;
+        let new_point_3d =
+            self.calculate_cursor_position_to_3d(state, bounds, cursor, last_point_3d)?;
 
         let new_point_3d = match axis {
             EditAxis::EditX => Vector3::new(new_point_3d.x, last_point_3d.y, last_point_3d.z),
@@ -403,6 +499,7 @@ where
         state: &State,
         bounds: Rectangle,
         cursor: &Vector,
+        last_point: Vector3<f32>,
     ) -> Option<Vector3<f32>> {
         let Some(compute_solution) = &self.compute_solution else {
             return None;
@@ -429,19 +526,13 @@ where
 
         let point3d2 = Point3::from_homogeneous(point)?;
 
-        let last_point = if let Edit::Scale(_) = state.edit_state {
-            self.custom_origin_translation
-                .borrow()
-                .unwrap_or_else(|| self.draw_lines.borrow().last().cloned().unwrap_or_default())
-        } else {
-            self.draw_lines.borrow().last().cloned()?
-        };
         let axis = match state.edit_state {
-            Edit::Extrude(EditAxis::EditZ) | Edit::Scale(EditAxis::EditZ) => {
-                Vector3::new(1.0, 0.0, 0.0)
-            }
+            Edit::Extrude(EditAxis::EditZ)
+            | Edit::Scale(EditAxis::EditZ)
+            | Edit::MarkError(EditAxis::EditZ) => Vector3::new(1.0, 0.0, 0.0),
             _ => Vector3::new(0.0, 0.0, 1.0),
         };
+
         let intersection1_3d =
             line_insert_with_plane(&last_point, &axis, &point3d1.coords, &point3d2.coords);
         Some(intersection1_3d)
@@ -613,6 +704,7 @@ where
 pub struct State {
     pub first_point: Point,
     pub selected: usize,
+    pub selected_error: Option<usize>,
     pub is_second_point: bool,
     pub highlight: Option<usize>,
     pub edit: Option<Component>,
