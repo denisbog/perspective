@@ -16,11 +16,15 @@ use iced::{
     keyboard::{self, Key},
     widget::canvas::{self, Event, Stroke, Text},
 };
-use nalgebra::{Matrix3, Perspective3, Point3, Vector2, Vector3};
+use nalgebra::{Vector2, Vector3};
 
 use crate::{
-    Component, Edit, EditAxis,
-    compute::{ComputeSolution, line_insert_with_plane, relative_to_image_plane},
+    Component, Edit, EditAxis, PointInformation,
+    compute::ComputeSolution,
+    utils::{
+        calculate_cursor_position_to_3d, calculate_location_position_to_2d,
+        check_if_point_is_from_line_new, to_canvas,
+    },
 };
 
 pub struct DrawLine<'a, Message, Theme = iced::Theme, Renderer = iced::Renderer>
@@ -35,18 +39,14 @@ where
     draw_lines: Rc<RefCell<Vec<Vector3<f32>>>>,
     draw_lines_cache: geometry::Cache<Renderer>,
 
-    compute_solution: &'a Option<ComputeSolution>,
+    compute_solution: &'a Option<ComputeSolution<f32>>,
     renderer_: PhantomData<Renderer>,
     theme_: PhantomData<Theme>,
     image_size: Size<f32>,
     custom_origin_translation: Rc<RefCell<Option<Vector3<f32>>>>,
-    custom_scale: Rc<RefCell<Option<Vector3<f32>>>>,
     custom_scale_segment: Rc<RefCell<Option<usize>>>,
-    custom_scale_2d: Rc<RefCell<Option<Vector2<f32>>>>,
-    custom_scale_axis: Rc<RefCell<Option<EditAxis>>>,
-    custom_error: Rc<RefCell<Option<Vector3<f32>>>>,
-    custom_error_2d: Rc<RefCell<Option<Vector2<f32>>>>,
-    custom_error_axis: Rc<RefCell<Option<EditAxis>>>,
+    custom_scale: Rc<RefCell<Option<PointInformation<f32>>>>,
+    custom_error: Rc<RefCell<Option<PointInformation<f32>>>>,
 }
 impl<'a, Message, Theme, Renderer> DrawLine<'a, Message, Theme, Renderer>
 where
@@ -54,16 +54,12 @@ where
 {
     const DEFAULT_SIZE: f32 = 100.0;
     pub fn new(
-        compute_solution: &'a Option<ComputeSolution>,
+        compute_solution: &'a Option<ComputeSolution<f32>>,
         draw_lines: Rc<RefCell<Vec<Vector3<f32>>>>,
         custom_origin_translation: Rc<RefCell<Option<Vector3<f32>>>>,
-        custom_scale: Rc<RefCell<Option<Vector3<f32>>>>,
         custom_scale_segment: Rc<RefCell<Option<usize>>>,
-        custom_scale_2d: Rc<RefCell<Option<Vector2<f32>>>>,
-        custom_scale_axis: Rc<RefCell<Option<EditAxis>>>,
-        custom_error: Rc<RefCell<Option<Vector3<f32>>>>,
-        custom_error_2d: Rc<RefCell<Option<Vector2<f32>>>>,
-        custom_error_axis: Rc<RefCell<Option<EditAxis>>>,
+        custom_scale: Rc<RefCell<Option<PointInformation<f32>>>>,
+        custom_error: Rc<RefCell<Option<PointInformation<f32>>>>,
     ) -> Self {
         Self {
             width: Length::Fixed(Self::DEFAULT_SIZE),
@@ -77,13 +73,9 @@ where
             draw_lines_cache: geometry::Cache::default(),
             draw_lines,
             custom_origin_translation,
-            custom_scale,
             custom_scale_segment,
-            custom_scale_2d,
-            custom_scale_axis,
+            custom_scale,
             custom_error,
-            custom_error_2d,
-            custom_error_axis,
         }
     }
     pub fn width(mut self, width: impl Into<Length>) -> Self {
@@ -112,7 +104,7 @@ where
         let Some(cursor) = cursor.position_over(bounds) else {
             return (Status::Ignored, None);
         };
-        let cursor = cursor - bounds.position();
+        let adjusted_cursor = cursor - bounds.position();
         match event {
             Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Right)) => {
                 state.edit_state = Edit::Draw;
@@ -120,7 +112,7 @@ where
             }
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                 if let Edit::Draw = state.edit_state {
-                    let cursor = Point::new(cursor.x, cursor.y);
+                    let cursor = Point::new(adjusted_cursor.x, adjusted_cursor.y);
                     for (index, point) in state.points.borrow().iter().enumerate() {
                         if cursor.distance(*point) < 10.0 {
                             state.selected = index;
@@ -146,12 +138,10 @@ where
                         });
                 }
                 if let Edit::MarkError(_axis) = &state.edit_state {
-                    let cursor = Point::new(cursor.x, cursor.y);
+                    let cursor = Point::new(adjusted_cursor.x, adjusted_cursor.y);
                     for (index, point) in state.points.borrow().iter().enumerate() {
                         if cursor.distance(*point) < 10.0 {
-                            state.selected_error = Some(index);
-                            self.custom_error
-                                .replace(self.draw_lines.borrow().get(index).copied());
+                            state.selected = index;
                             self.draw_cache.clear();
                             return (Status::Ignored, None);
                         };
@@ -161,7 +151,7 @@ where
             }
             Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
                 let Some((new_point_3d, _last_point_3d, _color)) =
-                    self.extract_last_point_details_for_mode(state, bounds, &cursor)
+                    self.extract_last_point_details_for_mode(state, bounds, &adjusted_cursor)
                 else {
                     return (Status::Ignored, None);
                 };
@@ -174,21 +164,29 @@ where
                         state.edit_state = Edit::Draw;
                     }
                     Edit::Scale(axis) => {
-                        self.custom_scale.borrow_mut().replace(new_point_3d);
-                        self.custom_scale_2d
-                            .borrow_mut()
-                            .replace(Vector2::new(cursor.x, cursor.y));
-                        self.custom_scale_axis.borrow_mut().replace(axis.clone());
+                        self.custom_scale.borrow_mut().replace(PointInformation {
+                            vector: new_point_3d,
+                            source_vector: *self.draw_lines.borrow().get(state.selected).unwrap(),
+                            point: Vector2::new(
+                                adjusted_cursor.x / bounds.width,
+                                adjusted_cursor.y / bounds.height,
+                            ),
+                            axis: axis.clone(),
+                        });
                         self.draw_lines_cache.clear();
                         self.draw_cache.clear();
                         state.edit_state = Edit::Draw;
                     }
                     Edit::MarkError(axis) => {
-                        self.custom_error.borrow_mut().replace(new_point_3d);
-                        self.custom_error_2d
-                            .borrow_mut()
-                            .replace(Vector2::new(cursor.x, cursor.y));
-                        self.custom_error_axis.borrow_mut().replace(axis.clone());
+                        self.custom_error.borrow_mut().replace(PointInformation {
+                            vector: new_point_3d,
+                            source_vector: *self.draw_lines.borrow().get(state.selected).unwrap(),
+                            point: Vector2::new(
+                                adjusted_cursor.x / bounds.width,
+                                adjusted_cursor.y / bounds.height,
+                            ),
+                            axis: axis.clone(),
+                        });
                         self.draw_lines_cache.clear();
                         self.draw_cache.clear();
                         state.edit_state = Edit::Draw;
@@ -270,7 +268,8 @@ where
                     .draw_lines
                     .borrow()
                     .iter()
-                    .flat_map(|item| self.calculate_location_position_to_2d(state, bounds, item))
+                    .flat_map(|item| calculate_location_position_to_2d(self.compute_solution, item))
+                    .map(|item| to_canvas(bounds.size(), &item))
                     .map(|item| Point::new(item.x, item.y))
                     .collect();
 
@@ -311,6 +310,15 @@ where
             });
 
         let draw_cache = self.draw_cache.draw(renderer, bounds.size(), |frame| {
+            let selected_color = match &state.edit_state {
+                Edit::MarkError(_) => Color::from_rgba(0.8, 0.2, 0.2, 0.8),
+                Edit::ControlPoint => Color::from_rgba(0.8, 0.8, 0.2, 0.8),
+                Edit::Draw => Color::from_rgba(0.8, 0.8, 0.2, 0.8),
+                Edit::Extrude(_) => Color::from_rgba(0.8, 0.8, 0.8, 0.8),
+                Edit::Scale(_) => Color::from_rgba(0.2, 0.8, 0.2, 0.8),
+                Edit::None => Color::from_rgba(0.8, 0.8, 0.2, 0.8),
+            };
+
             if let Some(item) = state.points.borrow().get(state.selected) {
                 let mut builder = canvas::path::Builder::new();
                 builder.circle(*item, 5.0);
@@ -318,7 +326,7 @@ where
                 frame.stroke(
                     &path,
                     Stroke {
-                        style: canvas::Style::Solid(Color::from_rgba(0.8, 0.8, 0.2, 0.8)),
+                        style: canvas::Style::Solid(selected_color),
                         width: 2.0,
                         ..Stroke::default()
                     },
@@ -348,27 +356,22 @@ where
                         );
                     });
             }
-            if let Some(selected_error) = state.selected_error {
-                if let Some(item) = state.points.borrow().get(selected_error) {
-                    let mut builder = canvas::path::Builder::new();
-                    builder.circle(*item, 5.0);
-                    let path = builder.build();
-                    frame.stroke(
-                        &path,
-                        Stroke {
-                            style: canvas::Style::Solid(Color::from_rgba(0.8, 0.2, 0.2, 0.8)),
-                            width: 2.0,
-                            ..Stroke::default()
-                        },
-                    );
-                };
-            }
             if let Edit::Draw = state.edit_state {
-                if let Some(end) = *self.custom_scale.borrow() {
-                    let start = *state.points.borrow().get(state.selected).unwrap();
-                    let end = self
-                        .calculate_location_position_to_2d(state, bounds, &end)
-                        .unwrap();
+                if let Some(scale) = self.custom_scale.borrow().as_ref() {
+                    let start = to_canvas(
+                        bounds.size(),
+                        &calculate_location_position_to_2d(
+                            self.compute_solution,
+                            &scale.source_vector,
+                        )
+                        .unwrap(),
+                    );
+                    let end = to_canvas(
+                        bounds.size(),
+                        &calculate_location_position_to_2d(self.compute_solution, &scale.vector)
+                            .unwrap(),
+                    );
+                    let start = Point::new(start.x, start.y);
                     let end = Point::new(end.x, end.y);
                     let mut builder = canvas::path::Builder::new();
                     builder.move_to(start);
@@ -383,15 +386,24 @@ where
                         },
                     );
                 }
-                if let Some(end) = *self.custom_error.borrow() {
-                    let start = *state
-                        .points
-                        .borrow()
-                        .get(state.selected_error.unwrap())
-                        .unwrap();
-                    let end = self
-                        .calculate_location_position_to_2d(state, bounds, &end)
-                        .unwrap();
+                if let Some(custom_error) = self.custom_error.borrow().as_ref() {
+                    let start = to_canvas(
+                        bounds.size(),
+                        &calculate_location_position_to_2d(
+                            self.compute_solution,
+                            &custom_error.source_vector,
+                        )
+                        .unwrap(),
+                    );
+                    let end = to_canvas(
+                        bounds.size(),
+                        &calculate_location_position_to_2d(
+                            self.compute_solution,
+                            &custom_error.vector,
+                        )
+                        .unwrap(),
+                    );
+                    let start = Point::new(start.x, start.y);
                     let end = Point::new(end.x, end.y);
                     let mut builder = canvas::path::Builder::new();
                     builder.move_to(start);
@@ -419,17 +431,15 @@ where
                 return;
             };
 
-            let Some(last_point) =
-                self.calculate_location_position_to_2d(state, bounds, &last_point_3d)
-            else {
-                return;
-            };
+            let last_point = to_canvas(
+                bounds.size(),
+                &calculate_location_position_to_2d(self.compute_solution, &last_point_3d).unwrap(),
+            );
 
-            let Some(new_point) =
-                self.calculate_location_position_to_2d(state, bounds, &new_point_3d)
-            else {
-                return;
-            };
+            let new_point = to_canvas(
+                bounds.size(),
+                &calculate_location_position_to_2d(self.compute_solution, &new_point_3d).unwrap(),
+            );
 
             let mut builder = canvas::path::Builder::new();
             frame.fill_text(Text {
@@ -471,10 +481,10 @@ where
             }
             Edit::Scale(axis) => {
                 let last_point_3d = *self.draw_lines.borrow().get(state.selected)?;
-                (axis, last_point_3d, Color::from_rgba(0.8, 0.8, 0.2, 0.8))
+                (axis, last_point_3d, Color::from_rgba(0.2, 0.8, 0.2, 0.8))
             }
             Edit::MarkError(axis) => {
-                let last_point_3d = *self.draw_lines.borrow().get(state.selected_error?)?;
+                let last_point_3d = *self.draw_lines.borrow().get(state.selected)?;
                 (axis, last_point_3d, Color::from_rgba(0.8, 0.2, 0.2, 0.8))
             }
             _w => {
@@ -482,8 +492,13 @@ where
             }
         };
 
-        let new_point_3d =
-            self.calculate_cursor_position_to_3d(state, bounds, cursor, last_point_3d)?;
+        let new_point_3d = calculate_cursor_position_to_3d(
+            axis,
+            self.compute_solution.as_ref().unwrap(),
+            self.image_size.width / self.image_size.height,
+            &Vector2::new(cursor.x / bounds.width, cursor.y / bounds.height),
+            last_point_3d,
+        )?;
 
         let new_point_3d = match axis {
             EditAxis::EditX => Vector3::new(new_point_3d.x, last_point_3d.y, last_point_3d.z),
@@ -493,95 +508,6 @@ where
         };
         Some((new_point_3d, last_point_3d, color))
     }
-
-    fn calculate_cursor_position_to_3d(
-        &self,
-        state: &State,
-        bounds: Rectangle,
-        cursor: &Vector,
-        last_point: Vector3<f32>,
-    ) -> Option<Vector3<f32>> {
-        let Some(compute_solution) = &self.compute_solution else {
-            return None;
-        };
-        let click_location = relative_to_image_plane(
-            self.image_size.width / self.image_size.height,
-            &Vector2::new(cursor.x / bounds.width, cursor.y / bounds.height),
-        );
-
-        let perspective = Perspective3::new(1.0, compute_solution.field_of_view, 0.01, 10.0);
-
-        let mut matrix = perspective.into_inner();
-        *matrix.index_mut((0, 2)) = -compute_solution.ortho_center.x;
-        *matrix.index_mut((1, 2)) = -compute_solution.ortho_center.y;
-
-        let model_view_projection = matrix * compute_solution.view_transform;
-        let model_view_projection = model_view_projection.try_inverse()?;
-        let last_point_axis = Vector3::zeros();
-        let point = model_view_projection * Point3::from(last_point_axis).to_homogeneous();
-        let point3d1 = Point3::from_homogeneous(point)?;
-
-        let point = Point3::new(click_location.x, click_location.y, 1.0).to_homogeneous();
-        let point = model_view_projection * point;
-
-        let point3d2 = Point3::from_homogeneous(point)?;
-
-        let axis = match state.edit_state {
-            Edit::Extrude(EditAxis::EditZ)
-            | Edit::Scale(EditAxis::EditZ)
-            | Edit::MarkError(EditAxis::EditZ) => Vector3::new(1.0, 0.0, 0.0),
-            _ => Vector3::new(0.0, 0.0, 1.0),
-        };
-
-        let intersection1_3d =
-            line_insert_with_plane(&last_point, &axis, &point3d1.coords, &point3d2.coords);
-        Some(intersection1_3d)
-    }
-
-    fn calculate_location_position_to_2d(
-        &self,
-        _state: &State,
-        bounds: Rectangle,
-        location3d: &Vector3<f32>,
-    ) -> Option<Vector2<f32>> {
-        let Some(compute_solution) = &self.compute_solution else {
-            return None;
-        };
-        let dc_to_image =
-            Matrix3::new_nonuniform_scaling(&Vector2::new(bounds.width / 2.0, bounds.width / -2.0))
-                .append_translation(&Vector2::new(bounds.width / 2.0, bounds.height / 2.0));
-
-        let perspective = Perspective3::new(1.0, compute_solution.field_of_view, 0.01, 10.0);
-
-        let mut matrix = perspective.into_inner();
-        *matrix.index_mut((0, 2)) = -compute_solution.ortho_center.x;
-        *matrix.index_mut((1, 2)) = -compute_solution.ortho_center.y;
-
-        let transform = matrix * compute_solution.view_transform;
-        let point = Point3::from(*location3d);
-
-        let point = transform * point.to_homogeneous();
-        let point = Point3::from_homogeneous(point)?;
-
-        Some(dc_to_image.transform_point(&point.xy()).coords)
-    }
-}
-
-pub fn check_if_point_is_from_line_new(
-    line_point_a: &Point,
-    line_point_b: &Point,
-    point: Point,
-) -> bool {
-    // https://en.wikipedia.org/wiki/Distance_from_a_point_to_a_line
-    // Line defined by two points
-    let error = ((line_point_b.y - line_point_a.y) * point.x
-        - (line_point_b.x - line_point_a.x) * point.y
-        + line_point_b.x * line_point_a.y
-        - line_point_b.y * line_point_a.x)
-        .abs()
-        / ((line_point_b.y - line_point_a.y).powi(2) + (line_point_b.x - line_point_a.x).powi(2))
-            .sqrt();
-    error < 3.0
 }
 
 impl<'a, Message, Theme, Renderer> Widget<Message, Theme, Renderer>
@@ -704,7 +630,6 @@ where
 pub struct State {
     pub first_point: Point,
     pub selected: usize,
-    pub selected_error: Option<usize>,
     pub is_second_point: bool,
     pub highlight: Option<usize>,
     pub edit: Option<Component>,

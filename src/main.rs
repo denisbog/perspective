@@ -4,9 +4,10 @@ use iced::futures::executor::block_on;
 use nalgebra::{Vector2, Vector3};
 use perspective::camera_pose::ComputeCameraPose;
 use perspective::draw::DrawLine;
-use perspective::optimize::ortho_center_optimize;
-use perspective::{AxisData, EditAxis};
+use perspective::optimize::{ortho_center_optimize, pose_optimize};
+use perspective::{AxisData, PointInformation};
 use std::cell::RefCell;
+use std::fmt::Debug;
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;
@@ -73,6 +74,7 @@ enum Message {
     ChangeMode(UiMod),
     ExportToFSpy,
     Optimize,
+    OptimizeForError,
 }
 
 #[derive(Default)]
@@ -81,20 +83,16 @@ struct Perspective {
     image_path: String,
     points_file_name: String,
     export_file_name: String,
-    compute_solution: Option<ComputeSolution>,
+    compute_solution: Option<ComputeSolution<f32>>,
     image_size: Size<f32>,
     draw_lines: Rc<RefCell<Vec<Vector3<f32>>>>,
     selected_image: u8,
     images: Vec<String>,
     mode: UiMod,
     custom_origin_translation: Rc<RefCell<Option<Vector3<f32>>>>,
-    custom_scale_vector: Rc<RefCell<Option<Vector3<f32>>>>,
     custom_scale_segment: Rc<RefCell<Option<usize>>>,
-    custom_scale_2d: Rc<RefCell<Option<Vector2<f32>>>>,
-    custom_scale_axis: Rc<RefCell<Option<EditAxis>>>,
-    custom_error_vector: Rc<RefCell<Option<Vector3<f32>>>>,
-    custom_error_2d: Rc<RefCell<Option<Vector2<f32>>>>,
-    custom_error_axis: Rc<RefCell<Option<EditAxis>>>,
+    custom_scale: Rc<RefCell<Option<PointInformation<f32>>>>,
+    custom_error: Rc<RefCell<Option<PointInformation<f32>>>>,
 }
 #[derive(Debug, Clone)]
 struct ImageData {
@@ -280,16 +278,11 @@ impl Perspective {
                 self.update(Message::CalculatePose);
             }
             Message::ApplyScale => {
-                let Some(custom_scale) = *self.custom_scale_vector.borrow() else {
+                let Some(custom_scale) = self.custom_scale.borrow().clone() else {
                     return;
                 };
+                let custom_scale = custom_scale.vector - custom_scale.source_vector;
 
-                let custom_scale =
-                    if let Some(custom_origin_scale) = *self.custom_origin_translation.borrow() {
-                        custom_scale - custom_origin_scale
-                    } else {
-                        custom_scale
-                    };
                 let scale = if let Some(custom_scale_segment) = *self.custom_scale_segment.borrow()
                 {
                     let start = *self.draw_lines.borrow().get(custom_scale_segment).unwrap();
@@ -311,8 +304,9 @@ impl Perspective {
                 } else {
                     scale
                 };
+                trace!("main scale {}", scale);
                 self.axis_data.as_ref().unwrap().borrow_mut().custom_scale = Some(scale);
-                self.custom_scale_vector.replace(None);
+                self.custom_scale.replace(None);
                 self.custom_scale_segment.replace(None);
                 self.update(Message::CalculatePose);
             }
@@ -365,6 +359,55 @@ impl Perspective {
                     self.update(Message::CalculatePose);
                 };
             }
+            Message::OptimizeForError => {
+                let Some(axis_data) = &self.axis_data else {
+                    return;
+                };
+                let ratio = self.image_size.width / self.image_size.height;
+                let axis_lines = axis_data
+                    .borrow()
+                    .axis_lines
+                    .iter()
+                    .cloned()
+                    .flat_map(|(a, b)| [Vector2::new(a.x, a.y), Vector2::new(b.x, b.y)])
+                    .collect();
+
+                let control_point = Vector2::new(
+                    axis_data.borrow().control_point.x,
+                    axis_data.borrow().control_point.y,
+                );
+
+                let flip = axis_data.borrow().flip;
+                let custom_translation = axis_data
+                    .borrow()
+                    .custom_origin_translation
+                    .unwrap_or_default();
+                let draw_lines = self.draw_lines.borrow().to_vec();
+                let scale = axis_data.borrow().custom_scale.unwrap_or(1.0) as f64;
+                if let Ok(lines) = pose_optimize(
+                    ratio,
+                    axis_lines,
+                    draw_lines,
+                    control_point,
+                    flip,
+                    custom_translation,
+                    *self.custom_scale_segment.borrow(),
+                    self.custom_scale.borrow().clone(),
+                    self.custom_error.borrow().clone(),
+                    scale,
+                ) {
+                    axis_data.borrow_mut().axis_lines = lines
+                        .chunks(2)
+                        .map(|items| {
+                            (
+                                Point::new(items[0].x, items[0].y),
+                                Point::new(items[1].x, items[1].y),
+                            )
+                        })
+                        .collect();
+                };
+                self.update(Message::CalculatePose);
+            }
         }
     }
     fn view(&self) -> Element<Message> {
@@ -381,13 +424,9 @@ impl Perspective {
                 &self.compute_solution,
                 Rc::clone(&self.draw_lines),
                 Rc::clone(&self.custom_origin_translation),
-                Rc::clone(&self.custom_scale_vector),
                 Rc::clone(&self.custom_scale_segment),
-                Rc::clone(&self.custom_scale_2d),
-                Rc::clone(&self.custom_scale_axis),
-                Rc::clone(&self.custom_error_vector),
-                Rc::clone(&self.custom_error_2d),
-                Rc::clone(&self.custom_error_axis),
+                Rc::clone(&self.custom_scale),
+                Rc::clone(&self.custom_error),
             )
             .image_size(self.image_size)
             .width(Length::Fill)
@@ -397,13 +436,9 @@ impl Perspective {
                 &self.compute_solution,
                 Rc::clone(&self.draw_lines),
                 Rc::clone(&self.custom_origin_translation),
-                Rc::clone(&self.custom_scale_vector),
                 Rc::clone(&self.custom_scale_segment),
-                Rc::clone(&self.custom_scale_2d),
-                Rc::clone(&self.custom_scale_axis),
-                Rc::clone(&self.custom_error_vector),
-                Rc::clone(&self.custom_error_2d),
-                Rc::clone(&self.custom_error_axis),
+                Rc::clone(&self.custom_scale),
+                Rc::clone(&self.custom_error),
             )
             .image_size(self.image_size)
             .width(Length::Fill)
@@ -415,13 +450,9 @@ impl Perspective {
                     self.custom_origin_translation.borrow().unwrap_or_default(),
                 ])),
                 Rc::clone(&self.custom_origin_translation),
-                Rc::clone(&self.custom_scale_vector),
                 Rc::clone(&self.custom_scale_segment),
-                Rc::clone(&self.custom_scale_2d),
-                Rc::clone(&self.custom_scale_axis),
-                Rc::clone(&self.custom_error_vector),
-                Rc::clone(&self.custom_error_2d),
-                Rc::clone(&self.custom_error_axis),
+                Rc::clone(&self.custom_scale),
+                Rc::clone(&self.custom_error),
             )
             .image_size(self.image_size)
             .width(Length::Fill)
@@ -537,6 +568,11 @@ impl Perspective {
                 );
                 buttons.push(button("Save lines").on_press(Message::Save).into());
                 buttons.push(button("Load lines").on_press(Message::LoadLines).into());
+                buttons.push(
+                    button("Optimize Error")
+                        .on_press(Message::OptimizeForError)
+                        .into(),
+                );
             }
             UiMod::Try => {
                 buttons.push(
@@ -585,7 +621,7 @@ impl Perspective {
                 .width(300)
             )
             .height(Length::Fill)
-            .padding(20),
+            .padding(50),
             row(buttons).width(Length::Fill).padding(10).spacing(5)
         )
         .into()
@@ -647,14 +683,17 @@ impl From<&Perspective> for Lines {
 
 #[cfg(test)]
 mod tests {
+    use std::f32::consts::PI;
+
     use anyhow::Result;
-    use nalgebra::{Matrix3, RowVector3, Vector2};
+    use nalgebra::{Matrix3, Perspective3, Point3, RowVector3, Vector2};
     use perspective::{
         compute::{
             compute_camera_pose, compute_camera_pose_scale, find_vanishing_point_for_lines,
-            relative_to_image_plane, store_scene_data_to_file,
+            store_scene_data_to_file,
         },
         optimize::ortho_center_optimize,
+        utils::relative_to_image_plane,
     };
     use tracing::trace;
     use tracing_subscriber::EnvFilter;
@@ -724,63 +763,6 @@ mod tests {
             .with_env_filter(EnvFilter::from_default_env())
             .init();
 
-        //{ position: [0.6746836, 0.5918425,
-        //0.8013924, 0.5004782,
-        //0.50898737, 0.11926863,
-        //0.64367086, 0.078312226,
-        //0.6596202, 0.5918425,
-        //0.52405065, 0.5130802,
-        //0.65607595, 0.08146272,
-        //0.7748101, 0.11139241,
-        //0.66759497, 0.5571871,
-        //0.67556965, 0.19330521,
-        //0.5001266, 0.365007,
-        //0.5001266, 0.13344586
-        //], value: 0.08237194269895554 };
-        //{ position: [
-        //0.674654800662414, 0.5918025346293277,
-        //0.8014244290548542, 0.5005226472901101,
-        //0.5090072593877548, 0.11933393009034284,
-        //0.6436488917633901, 0.07824010065005475,
-        //0.6596201874083368, 0.5918425252953883,
-        //0.5240506641220501, 0.5130801695112077,
-        //0.6560593953908096, 0.081528506643735,
-        //0.7748254724952184, 0.11133131940359936,
-        //0.6674065474058676, 0.557182902397655,
-        //0.6757490690327026, 0.19330920746977442,
-        //0.5002829503818129, 0.3650070018465889,
-        //0.4999746487460301, 0.13344585823364694],
-        //value: 0.002081983194845036 }
-        //
-        //
-        //[0.6746548, 0.59180254,
-        //0.80142444, 0.5005227,
-        //0.5090073, 0.11933393,
-        //0.64364886, 0.078240104,
-        //0.65962017, 0.59184253,
-        //0.52405065, 0.5130802,
-        //0.6560594, 0.08152851,
-        //0.77482545, 0.11133132,
-        //0.66740656, 0.5571829,
-        //0.67574906, 0.1933092,
-        //0.50028294, 0.365007,
-        //0.49997464, 0.13344586]
-        //
-        //
-        //
-        //[0.6746521, 0.59179884,
-        //0.8014274, 0.5005268,
-        //0.5090096, 0.11934169,
-        //0.6436463, 0.078231536,
-        //0.65961885, 0.5918448,
-        //0.5240521, 0.51307774,
-        //0.6560569, 0.08153848,
-        //0.7748278, 0.11132205,
-        //0.66739833, 0.5571827,
-        //0.6757568, 0.19330938,
-        //0.5002778, 0.365007,
-        //0.49997953, 0.13344586]
-        //
         let points = vec![
             Vector2::new(0.6746836, 0.5918425),
             Vector2::new(0.8013924, 0.5004782),
@@ -801,6 +783,37 @@ mod tests {
         let ratio = image_width / image_height;
         let points = ortho_center_optimize(ratio, points);
         trace!("solution: {:?}", points);
+        Ok(())
+    }
+    #[tokio::test]
+    async fn space_convertion() -> Result<()> {
+        tracing_subscriber::fmt()
+            .with_env_filter(EnvFilter::from_default_env())
+            .init();
+        let point = relative_to_image_plane(1.33, &Vector2::new(0.0, 0.0));
+        trace!("point {point}");
+        let point = relative_to_image_plane(1.33, &Vector2::new(0.5, 0.5));
+        trace!("point {point}");
+        let point = relative_to_image_plane(1.33, &Vector2::new(1.0, 1.0));
+        trace!("point {point}");
+        Ok(())
+    }
+    #[tokio::test]
+    async fn matrix_test() -> Result<()> {
+        tracing_subscriber::fmt()
+            .with_env_filter(EnvFilter::from_default_env())
+            .init();
+
+        let perspective = Perspective3::new(1.0, PI / 2.0, 0.01, 10000.0);
+        let point = Point3::new(100.0, 100.0, 100.0);
+        let point = perspective.into_inner() * point.to_homogeneous();
+        let point = Point3::from_homogeneous(point);
+        trace!("point {:?}", point);
+        let perspective = Perspective3::new(1.0f64, (PI as f64) / 2.0f64, 0.01f64, 10000.0f64);
+        let point = Point3::new(100.0f64, 100.0f64, 100.0f64);
+        let point = perspective.into_inner() * point.to_homogeneous();
+        let point = Point3::from_homogeneous(point);
+        trace!("point {:?}", point);
         Ok(())
     }
 }

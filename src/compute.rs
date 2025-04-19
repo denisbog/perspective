@@ -1,15 +1,22 @@
-use std::{fs::File, io::Read};
+use std::{
+    fs::File,
+    io::Read,
+    ops::{AddAssign, DivAssign, MulAssign, SubAssign},
+};
 
 use anyhow::Result;
 use iced::{Point, Size};
-use nalgebra::{Matrix3, Matrix4, Point2, RowVector3, Vector2, Vector3};
+use nalgebra::{
+    ComplexField, Matrix3, Matrix4, RowVector3, Scalar, SimdComplexField, Vector2, Vector3,
+};
+use num_traits::Float;
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio_util::{bytes::BytesMut, codec::Encoder};
 
 use crate::{
     AxisData, FSpyData, SceneSettings, encoder::FSpyEncoder,
-    fspy::compute_solution_to_scene_settings,
+    fspy::compute_solution_to_scene_settings, utils::relative_to_image_plane,
 };
 
 #[derive(Serialize, Deserialize)]
@@ -103,16 +110,16 @@ pub fn read_points_from_file(points: &String) -> Result<(AxisData, Option<Vec<Ve
     ))
 }
 
-pub fn adaptor_compute_solution_to_scene_settings(
+pub fn adaptor_compute_solution_to_scene_settings<T: Float + ComplexField + Into<f32>>(
     image_width: u32,
     image_height: u32,
-    compute_solution: &ComputeSolution,
+    compute_solution: &ComputeSolution<T>,
 ) -> Result<SceneSettings> {
     compute_solution_to_scene_settings(image_width, image_height, compute_solution)
 }
 
-pub async fn store_scene_data_to_file(
-    compute_solution: &ComputeSolution,
+pub async fn store_scene_data_to_file<T: Float + ComplexField + Into<f32>>(
+    compute_solution: &ComputeSolution<T>,
     image_width: u32,
     image_height: u32,
     image_path: String,
@@ -137,17 +144,19 @@ pub async fn store_scene_data_to_file(
     repackage_file.write_all(&dst).await?;
     Ok(data)
 }
-pub fn compute_ui_adapter(
-    x_lines: [(Point, Point); 2],
-    y_lines: [(Point, Point); 2],
-    z_lines: [(Point, Point); 2],
-    image_size: Size<f32>,
-    control_point: &Point,
+pub fn compute_ui_adapter<
+    T: Float + SubAssign + MulAssign + DivAssign + AddAssign + ComplexField + Scalar,
+>(
+    x_lines: [(Point<T>, Point<T>); 2],
+    y_lines: [(Point<T>, Point<T>); 2],
+    z_lines: [(Point<T>, Point<T>); 2],
+    image_size: Size<T>,
+    control_point: &Point<T>,
     flip: (bool, bool, bool),
-    translate_origin: &Option<Vector3<f32>>,
-    scale: &Option<f32>,
-) -> Result<ComputeSolution> {
-    let points: [Vector2<f32>; 12] = [
+    translate_origin: &Option<Vector3<T>>,
+    scale: &Option<T>,
+) -> Result<ComputeSolution<T>> {
+    let points: [Vector2<T>; 12] = [
         Vector2::new(x_lines[0].0.x, x_lines[0].0.y),
         Vector2::new(x_lines[0].1.x, x_lines[0].1.y),
         Vector2::new(x_lines[1].0.x, x_lines[1].0.y),
@@ -161,15 +170,27 @@ pub fn compute_ui_adapter(
         Vector2::new(z_lines[1].0.x, z_lines[1].0.y),
         Vector2::new(z_lines[1].1.x, z_lines[1].1.y),
     ];
-    let control_point: Vector2<f32> = Vector2::new(control_point.x, control_point.y);
+    let control_point: Vector2<T> = Vector2::new(control_point.x, control_point.y);
 
     let x = if flip.0 { 1.0 } else { -1.0 };
     let y = if flip.1 { 1.0 } else { -1.0 };
     let z = if flip.2 { 1.0 } else { -1.0 };
     let axis = Matrix3::from_rows(&[
-        RowVector3::new(x, 0.0, 0.0),
-        RowVector3::new(0.0, y, 0.0),
-        RowVector3::new(0.0, 0.0, z),
+        RowVector3::new(
+            T::from(x).unwrap(),
+            T::from(0.0).unwrap(),
+            T::from(0.0).unwrap(),
+        ),
+        RowVector3::new(
+            T::from(0.0).unwrap(),
+            T::from(y).unwrap(),
+            T::from(0.0).unwrap(),
+        ),
+        RowVector3::new(
+            T::from(0.0).unwrap(),
+            T::from(0.0).unwrap(),
+            T::from(z).unwrap(),
+        ),
     ]);
 
     let ratio = image_size.width / image_size.height;
@@ -178,12 +199,12 @@ pub fn compute_ui_adapter(
     let vanishing_points = points
         .chunks(4)
         .map(|lines| find_vanishing_point_for_lines(&lines[0], &lines[1], &lines[2], &lines[3]))
-        .collect::<Vec<Vector2<f32>>>();
+        .collect::<Vec<Vector2<T>>>();
 
     let vanishing_points = vanishing_points
         .iter()
         .map(|point| relative_to_image_plane(ratio, point))
-        .collect::<Vec<Vector2<f32>>>();
+        .collect::<Vec<Vector2<T>>>();
 
     let compute_solution = compute_camera_pose(&vanishing_points, &user_selected_origin, axis);
 
@@ -207,27 +228,37 @@ pub fn compute_ui_adapter(
     }
 }
 
-pub fn compute_camera_pose_scale(
-    mut compute_solution: ComputeSolution,
-    scale: f32,
-) -> Result<ComputeSolution> {
+pub fn compute_camera_pose_scale<T: Float + MulAssign + AddAssign + Scalar>(
+    mut compute_solution: ComputeSolution<T>,
+    scale: T,
+) -> Result<ComputeSolution<T>> {
     compute_solution.view_transform *= Matrix4::new_scaling(scale);
     Ok(compute_solution)
 }
 
-pub fn compute_camera_pose_translation(
-    mut compute_solution: ComputeSolution,
-    translate_origin: &Vector3<f32>,
-) -> Result<ComputeSolution> {
+pub fn compute_camera_pose_translation<T: Float + AddAssign + SubAssign + MulAssign + Scalar>(
+    mut compute_solution: ComputeSolution<T>,
+    translate_origin: &Vector3<T>,
+) -> Result<ComputeSolution<T>> {
     compute_solution.view_transform *=
         Matrix4::new_translation(&(Vector3::zeros() - translate_origin));
     Ok(compute_solution)
 }
-pub fn compute_camera_pose(
-    vanishing_points: &[Vector2<f32>],
-    user_selected_origin: &Vector2<f32>,
-    axis: Matrix3<f32>,
-) -> Result<ComputeSolution> {
+pub fn compute_camera_pose<
+    T: Float
+        + std::ops::SubAssign
+        + AddAssign
+        + MulAssign
+        + SimdComplexField
+        + DivAssign
+        + MulAssign
+        + Scalar
+        + 'static,
+>(
+    vanishing_points: &[Vector2<T>],
+    user_selected_origin: &Vector2<T>,
+    axis: Matrix3<T>,
+) -> Result<ComputeSolution<T>> {
     let ortho_center = triangle_ortho_center(
         &vanishing_points[0],
         &vanishing_points[1],
@@ -278,11 +309,11 @@ pub fn compute_camera_pose(
     let view_transform = rotation_matrix * axis;
     let mut view_transform = view_transform.to_homogeneous();
 
-    let mut origin3d: Vector3<f32> = (user_selected_origin - ortho_center).to_homogeneous();
+    let mut origin3d: Vector3<T> = (user_selected_origin - ortho_center).to_homogeneous();
     origin3d.z = -focal_length;
     origin3d /= focal_length;
     // apply default scale
-    origin3d *= 10.0;
+    origin3d *= T::from(10.0).unwrap();
     view_transform.append_translation_mut(&origin3d);
 
     //let model_view_projection = matrix * translation * view_transform;
@@ -299,12 +330,12 @@ pub fn compute_camera_pose(
     ))
 }
 
-pub fn find_vanishing_point_for_lines(
-    a: &Vector2<f32>,
-    b: &Vector2<f32>,
-    c: &Vector2<f32>,
-    d: &Vector2<f32>,
-) -> Vector2<f32> {
+pub fn find_vanishing_point_for_lines<T: Float + Scalar + 'static>(
+    a: &Vector2<T>,
+    b: &Vector2<T>,
+    c: &Vector2<T>,
+    d: &Vector2<T>,
+) -> Vector2<T> {
     let x1 = a.x;
     let x2 = b.x;
     let x3 = c.x;
@@ -317,7 +348,11 @@ pub fn find_vanishing_point_for_lines(
         / ((x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4));
     Vector2::new(x1 + t * (x2 - x1), y1 + t * (y2 - y1))
 }
-pub fn triangle_ortho_center(x: &Vector2<f32>, y: &Vector2<f32>, z: &Vector2<f32>) -> Vector2<f32> {
+pub fn triangle_ortho_center<T: Float + Scalar + 'static>(
+    x: &Vector2<T>,
+    y: &Vector2<T>,
+    z: &Vector2<T>,
+) -> Vector2<T> {
     let a = x.x;
     let b = x.y;
     let c = y.x;
@@ -343,79 +378,21 @@ pub fn triangle_ortho_center(x: &Vector2<f32>, y: &Vector2<f32>, z: &Vector2<f32
     Vector2::new(x, y)
 }
 
-pub fn line_insert_with_yz_plane(
-    control_point_a3d: &Vector3<f32>,
-    control_point_b3d: &Vector3<f32>,
-) -> Vector3<f32> {
-    let axis = Vector3::new(1.0, 0.0, 0.0);
-    line_insert_with_axis(&axis, control_point_a3d, control_point_b3d)
-}
-
-pub fn line_insert_with_xy_plane(
-    control_point_a3d: &Vector3<f32>,
-    control_point_b3d: &Vector3<f32>,
-) -> Vector3<f32> {
-    let axis = Vector3::new(0.0, 0.0, 1.0);
-    line_insert_with_axis(&axis, control_point_a3d, control_point_b3d)
-}
-
-pub fn line_insert_with_axis(
-    axis: &Vector3<f32>,
-    control_point_a3d: &Vector3<f32>,
-    control_point_b3d: &Vector3<f32>,
-) -> Vector3<f32> {
-    line_insert_with_plane(
-        &Vector3::zeros(),
-        axis,
-        control_point_a3d,
-        control_point_b3d,
-    )
-}
-
-pub fn line_insert_with_plane(
-    plane_point: &Vector3<f32>,
-    normal_to_plane: &Vector3<f32>,
-    a: &Vector3<f32>,
-    b: &Vector3<f32>,
-) -> Vector3<f32> {
-    let t = normal_to_plane.dot(&(a - plane_point)) / -normal_to_plane.dot(&(b - a));
-    a + (b - a) * t
-}
-
 #[derive(Clone)]
-pub struct ComputeSolution {
-    pub view_transform: Matrix4<f32>,
-    pub ortho_center: Vector2<f32>,
-    pub focal_length: f32,
-    pub field_of_view: f32,
+pub struct ComputeSolution<T> {
+    pub view_transform: Matrix4<T>,
+    pub ortho_center: Vector2<T>,
+    pub focal_length: T,
+    pub field_of_view: T,
 }
 
-impl ComputeSolution {
-    pub fn new(
-        view_transform: Matrix4<f32>,
-        ortho_center: Vector2<f32>,
-        focal_length: f32,
-    ) -> Self {
+impl<T: Float> ComputeSolution<T> {
+    pub fn new(view_transform: Matrix4<T>, ortho_center: Vector2<T>, focal_length: T) -> Self {
         Self {
             view_transform,
             ortho_center,
             focal_length,
-            field_of_view: 2.0 * (1.0 / focal_length).atan(),
+            field_of_view: T::from(2.0).unwrap() * (T::from(1.0).unwrap() / focal_length).atan(),
         }
     }
-}
-/// translate and scale to image space where center of the image is 0,0
-pub fn relative_to_image_plane(ratio: f32, image_point: &Vector2<f32>) -> Vector2<f32> {
-    let transform = Matrix3::new_nonuniform_scaling(&Vector2::new(2.0, -2.0 / ratio))
-        .append_translation(&Vector2::new(-1.0, 1.0 / ratio));
-    let point = Point2::from(*image_point).to_homogeneous();
-    Point2::from_homogeneous(transform * point).unwrap().coords
-}
-// corner up left: 0,0; bottom right: size.width, size.height;
-pub fn to_canvas(bounds: Size, image_point: &Vector2<f32>) -> Vector2<f32> {
-    let transform =
-        Matrix3::new_nonuniform_scaling(&Vector2::new(bounds.width / 2.0, bounds.width / -2.0))
-            .append_translation(&Vector2::new(bounds.width / 2.0, bounds.height / 2.0));
-    let point = Point2::from(*image_point).to_homogeneous();
-    Point2::from_homogeneous(transform * point).unwrap().coords
 }

@@ -48,7 +48,7 @@ where
     cache: geometry::Cache<Renderer>,
     axis_cache: geometry::Cache<Renderer>,
 
-    compute_solution: &'a Option<ComputeSolution>,
+    compute_solution: &'a Option<ComputeSolution<f32>>,
     renderer_: PhantomData<Renderer>,
     theme_: PhantomData<Theme>,
     axis_data: Rc<RefCell<AxisData>>,
@@ -61,7 +61,7 @@ where
     const DEFAULT_SIZE: f32 = 100.0;
     pub fn new(
         axis_data: Rc<RefCell<AxisData>>,
-        compute_solution: &'a Option<ComputeSolution>,
+        compute_solution: &'a Option<ComputeSolution<f32>>,
     ) -> Self {
         ComputeCameraPose {
             width: Length::Fixed(Self::DEFAULT_SIZE),
@@ -264,17 +264,15 @@ where
                 Edit::None => {
                     if state.is_second_point {
                         (Status::Captured, Some(CameraPoseMessage::DragLine))
+                    } else if !state.is_alt {
+                        (
+                            Status::Captured,
+                            Some(CameraPoseMessage::EditEndpoint {
+                                cursor: scale_cursor,
+                            }),
+                        )
                     } else {
-                        if !state.is_alt {
-                            (
-                                Status::Captured,
-                                Some(CameraPoseMessage::EditEndpoint {
-                                    cursor: scale_cursor,
-                                }),
-                            )
-                        } else {
-                            (Status::Ignored, None)
-                        }
+                        (Status::Ignored, None)
                     }
                 }
                 _ => (Status::Ignored, None),

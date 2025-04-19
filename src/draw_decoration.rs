@@ -12,10 +12,8 @@ use num_traits::ToPrimitive;
 
 use crate::{
     Edit,
-    compute::{
-        find_vanishing_point_for_lines, relative_to_image_plane, to_canvas, triangle_ortho_center,
-    },
-    utils::scale_point_to_canvas,
+    compute::{find_vanishing_point_for_lines, triangle_ortho_center},
+    utils::{relative_to_image_plane, scale_point_to_canvas, to_canvas},
 };
 
 pub fn draw_vanishing_points<Renderer>(

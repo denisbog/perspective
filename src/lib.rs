@@ -7,8 +7,10 @@ pub mod encoder;
 pub mod fspy;
 pub mod optimize;
 pub mod utils;
+use std::fmt::Debug;
+
 use iced::Point;
-use nalgebra::Vector3;
+use nalgebra::{Scalar, Vector2, Vector3};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -125,6 +127,33 @@ impl Default for AxisData {
             flip: (false, false, false),
             custom_origin_translation: None,
             custom_scale: None,
+        }
+    }
+}
+
+#[derive(Default, Debug, Clone)]
+pub struct PointInformation<T: Scalar> {
+    pub vector: Vector3<T>,
+    pub source_vector: Vector3<T>,
+    pub point: Vector2<T>,
+    pub axis: EditAxis,
+}
+
+impl From<&PointInformation<f32>> for PointInformation<f64> {
+    fn from(val: &PointInformation<f32>) -> Self {
+        Self {
+            vector: Vector3::new(
+                val.vector.x.into(),
+                val.vector.y.into(),
+                val.vector.z.into(),
+            ),
+            source_vector: Vector3::new(
+                val.source_vector.x.into(),
+                val.source_vector.y.into(),
+                val.source_vector.z.into(),
+            ),
+            point: Vector2::new(val.point.x.into(), val.point.y.into()),
+            axis: val.axis.clone(),
         }
     }
 }
