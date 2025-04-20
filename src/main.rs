@@ -382,17 +382,17 @@ impl Perspective {
                     .borrow()
                     .custom_origin_translation
                     .unwrap_or_default();
-                let draw_lines = self.draw_lines.borrow().to_vec();
+                //let draw_lines = self.draw_lines.borrow().to_vec();
                 let scale = axis_data.borrow().custom_scale.unwrap_or(1.0) as f64;
                 if let Ok(lines) = pose_optimize(
                     ratio,
                     axis_lines,
-                    draw_lines,
+                    //draw_lines,
                     control_point,
                     flip,
                     custom_translation,
-                    *self.custom_scale_segment.borrow(),
-                    self.custom_scale.borrow().clone(),
+                    //*self.custom_scale_segment.borrow(),
+                    //self.custom_scale.borrow().clone(),
                     self.custom_error.borrow().clone(),
                     scale,
                 ) {

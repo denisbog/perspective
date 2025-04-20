@@ -2,7 +2,6 @@ use nalgebra::{Matrix3, RowVector3, Vector2, Vector3};
 
 use anyhow::Result;
 use optimization::{Func, GradientDescent, Minimizer, NumericalDifferentiation};
-use tracing::trace;
 
 use crate::{
     PointInformation,
@@ -10,9 +9,7 @@ use crate::{
         compute_camera_pose, compute_camera_pose_scale, compute_camera_pose_translation,
         find_vanishing_point_for_lines, triangle_ortho_center,
     },
-    utils::{
-        calculate_cursor_position_to_3d, calculate_location_position_to_2d, relative_to_image_plane,
-    },
+    utils::{calculate_location_position_to_2d, relative_to_image_plane},
 };
 
 pub fn ortho_center_optimize(ratio: f32, points: Vec<Vector2<f32>>) -> Result<Vec<Vector2<f32>>> {
