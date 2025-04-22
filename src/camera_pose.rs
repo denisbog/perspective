@@ -12,7 +12,7 @@ use iced::{
             tree::{self},
         },
     },
-    event::{self, Status},
+    event::Status,
     mouse::ScrollDelta,
     widget::canvas::{self, Event, Stroke, Text},
 };
@@ -137,7 +137,7 @@ where
     fn update_inner(
         &self,
         state: &mut State,
-        event: Event,
+        event: &Event,
         bounds: Rectangle,
         cursor: mouse::Cursor,
     ) -> (Status, Option<CameraPoseMessage>) {
@@ -315,7 +315,7 @@ where
                     &path,
                     Stroke {
                         style: canvas::Style::Solid(Color::from_rgba(1.0, 0.0, 0.0, 0.8)),
-                        width: 1.0,
+                        width: 2.0,
                         ..Stroke::default()
                     },
                 );
@@ -334,7 +334,7 @@ where
                         &path,
                         Stroke {
                             style: canvas::Style::Solid(Color::from_rgba(0.0, 0.0, 0.9, 0.7)),
-                            width: 1.0,
+                            width: 2.0,
                             ..Stroke::default()
                         },
                     );
@@ -472,7 +472,7 @@ where
                     transform,
                     dc_to_image,
                 );
-                let yellow = Color::new(0.8, 0.8, 0.2, 0.8);
+                let yellow = Color::from_rgba(0.8, 0.8, 0.2, 0.8);
                 let ortho_center =
                     dc_to_image * Point2::from(compute_solution.ortho_center.xy()).to_homogeneous();
 
@@ -531,41 +531,29 @@ where
         layout::atomic(limits, self.width, self.height)
     }
 
-    fn on_event(
+    fn update(
         &mut self,
         tree: &mut Tree,
-        event: iced::Event,
+        event: &Event,
         layout: Layout<'_>,
         cursor: mouse::Cursor,
         _renderer: &Renderer,
         _clipboard: &mut dyn Clipboard,
         _shell: &mut Shell<'_, Message>,
         _viewport: &Rectangle,
-    ) -> event::Status {
+    ) {
         let bounds = layout.bounds();
-        let canvas_event = match event {
-            iced::Event::Mouse(mouse_event) => Some(Event::Mouse(mouse_event)),
-            iced::Event::Touch(touch_event) => Some(Event::Touch(touch_event)),
-            iced::Event::Keyboard(keyboard_event) => Some(Event::Keyboard(keyboard_event)),
-            iced::Event::Window(_) => None,
-        };
 
-        if let Some(canvas_event) = canvas_event {
-            let state = tree.state.downcast_mut::<State>();
+        let state = tree.state.downcast_mut::<State>();
 
-            let (event_status, message) = self.update_inner(state, canvas_event, bounds, cursor);
-            if let Some(message) = message {
-                self.handle_internal_event(state, message);
-            }
-
-            //if let Some(message) = message {
-            //    shell.publish(message);
-            //}
-
-            return event_status;
+        let (event_status, message) = self.update_inner(state, event, bounds, cursor);
+        if let Some(message) = message {
+            self.handle_internal_event(state, message);
         }
 
-        event::Status::Ignored
+        //if let Some(message) = message {
+        //    shell.publish(message);
+        //}
     }
 
     fn mouse_interaction(

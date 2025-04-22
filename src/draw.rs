@@ -12,7 +12,7 @@ use iced::{
             tree::{self},
         },
     },
-    event::{self, Status},
+    event::Status,
     keyboard::{self, Key},
     widget::canvas::{self, Event, Stroke, Text},
 };
@@ -97,7 +97,7 @@ where
     fn update_inner(
         &self,
         state: &mut State,
-        event: Event,
+        event: &Event,
         bounds: Rectangle,
         cursor: mouse::Cursor,
     ) -> (Status, Option<Message>) {
@@ -543,41 +543,29 @@ where
         layout::atomic(limits, self.width, self.height)
     }
 
-    fn on_event(
+    fn update(
         &mut self,
         tree: &mut Tree,
-        event: iced::Event,
+        event: &Event,
         layout: Layout<'_>,
         cursor: mouse::Cursor,
         _renderer: &Renderer,
         _clipboard: &mut dyn Clipboard,
         _shell: &mut Shell<'_, Message>,
         _viewport: &Rectangle,
-    ) -> event::Status {
+    ) {
         let bounds = layout.bounds();
-        let canvas_event = match event {
-            iced::Event::Mouse(mouse_event) => Some(Event::Mouse(mouse_event)),
-            iced::Event::Touch(touch_event) => Some(Event::Touch(touch_event)),
-            iced::Event::Keyboard(keyboard_event) => Some(Event::Keyboard(keyboard_event)),
-            iced::Event::Window(_) => None,
-        };
 
-        if let Some(canvas_event) = canvas_event {
-            let state = tree.state.downcast_mut::<State>();
+        let state = tree.state.downcast_mut::<State>();
 
-            let (event_status, _message) = self.update_inner(state, canvas_event, bounds, cursor);
-            //if let Some(message) = message {
-            //    self.handle_internal_event(state, message);
-            //}
+        let (event_status, _message) = self.update_inner(state, event, bounds, cursor);
+        //if let Some(message) = message {
+        //    self.handle_internal_event(state, message);
+        //}
 
-            //if let Some(message) = message {
-            //    shell.publish(message);
-            //}
-
-            return event_status;
-        }
-
-        event::Status::Ignored
+        //if let Some(message) = message {
+        //    shell.publish(message);
+        //}
     }
 
     fn mouse_interaction(

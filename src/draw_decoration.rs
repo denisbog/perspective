@@ -87,7 +87,7 @@ pub fn draw_vanishing_points<Renderer>(
         &relative_to_image_plane(ratio, &vanishing_point_z),
     );
     let ortho_center = to_canvas(bounds.size(), &ortho_center);
-    let yellow = Color::new(0.8, 0.8, 0.2, 0.8);
+    let yellow = Color::from_rgba(0.8, 0.8, 0.2, 0.8);
 
     let mut builder = canvas::path::Builder::new();
 

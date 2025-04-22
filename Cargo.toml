@@ -32,8 +32,8 @@ zoomer = {path = "components/zoomer"}
 members=["components/*"]
 
 [workspace.dependencies]
-iced = { git = "https://github.com/iced-rs/iced.git", branch = "latest", features = ["debug", "tokio", "canvas", "image", "advanced"] }
-
+iced = { git = "https://github.com/iced-rs/iced.git", branch = "master", features = ["debug", "tokio", "canvas", "image", "advanced"] }
+tracing = "0.1.41"
 
 #[profile.dev.package."*"]
 #inherits = "release"

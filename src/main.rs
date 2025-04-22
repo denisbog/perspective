@@ -1,8 +1,16 @@
 use ::image::ImageReader;
 use clap::{Parser, command};
+use iced::Alignment::Center;
+use iced::Length::Fill;
 use iced::futures::executor::block_on;
+use iced::widget::{button, center, column, image, row, scrollable, stack, text};
+use iced::{Element, Length, Point, Size, Task, Theme};
 use nalgebra::{Vector2, Vector3};
 use perspective::camera_pose::ComputeCameraPose;
+use perspective::compute::{
+    ComputeSolution, Lines, StoreLine, StorePoint, StorePoint3d, compute_ui_adapter,
+    read_points_from_file, store_scene_data_to_file,
+};
 use perspective::draw::DrawLine;
 use perspective::optimize::{ortho_center_optimize, pose_optimize};
 use perspective::{AxisData, PointInformation};
@@ -12,18 +20,9 @@ use std::fs::File;
 use std::io::Write;
 use std::path::Path;
 use std::rc::Rc;
-use zoomer::ZoomViewer;
-
-use iced::Alignment::Center;
-use iced::Length::Fill;
-use iced::widget::{button, center, column, image, row, scrollable, slider, stack, text};
-use iced::{Element, Length, Point, Size, Task, Theme};
-use perspective::compute::{
-    ComputeSolution, Lines, StoreLine, StorePoint, StorePoint3d, compute_ui_adapter,
-    read_points_from_file, store_scene_data_to_file,
-};
 use tracing::{trace, warn};
 use tracing_subscriber::EnvFilter;
+use zoomer::zoom_viewer::zoomer;
 
 use anyhow::Result;
 #[derive(Parser, Debug)]
@@ -40,11 +39,11 @@ pub fn main() -> iced::Result {
         .with_env_filter(EnvFilter::from_default_env())
         .init();
 
-    iced::application("Perspective", Perspective::update, Perspective::view)
+    iced::application(Perspective::new, Perspective::update, Perspective::view)
         .theme(Perspective::theme)
         .antialiasing(true)
         .centered()
-        .run_with(Perspective::new)
+        .run()
 }
 
 #[derive(Default, Clone, Debug)]
@@ -591,33 +590,24 @@ impl Perspective {
         column!(
             row!(
                 column!(stack!(
-                    ZoomViewer::new(self.images.get(self.selected_image as usize).unwrap())
-                        .scale(2.0),
+                    zoomer(self.images.get(self.selected_image as usize).unwrap()).scale(2.0),
                     component,
                 ),)
                 .width(Length::Fill),
-                column!(
-                    slider(
-                        0u8..=(self.images.len() - 1) as u8,
-                        self.selected_image,
-                        Message::SelectImage
-                    )
-                    .width(280),
-                    scrollable(
-                        column(self.images.iter().enumerate().map(|(index, item)| {
-                            button(
-                                image(item)
-                                    .content_fit(iced::ContentFit::Cover)
-                                    .width(280)
-                                    .height(200),
-                            )
-                            .on_press_with(move || Message::SelectImage(index as u8))
-                            .into()
-                        }))
-                        .padding(20)
-                        .spacing(20)
-                    )
-                )
+                column!(scrollable(
+                    column(self.images.iter().enumerate().map(|(index, item)| {
+                        button(
+                            image(item)
+                                .content_fit(iced::ContentFit::Cover)
+                                .width(280)
+                                .height(200),
+                        )
+                        .on_press_with(move || Message::SelectImage(index as u8))
+                        .into()
+                    }))
+                    .padding(20)
+                    .spacing(20)
+                ))
                 .width(300)
             )
             .height(Length::Fill)
