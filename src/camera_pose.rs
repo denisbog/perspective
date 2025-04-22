@@ -31,11 +31,9 @@ use crate::{
 
 #[derive(Debug, Clone)]
 enum CameraPoseMessage {
-    DragLine,
     EditEndpoint { cursor: Point },
     HighlightLine { highlight: Option<usize> },
     Editline { component: Option<Component> },
-    Redraw,
     MoveControlPoint { cursor: Point },
 }
 pub struct ComputeCameraPose<'a, Message, Theme = iced::Theme, Renderer = iced::Renderer>
@@ -94,10 +92,6 @@ where
 
     fn handle_internal_event(&mut self, state: &mut State, message: CameraPoseMessage) {
         match message {
-            CameraPoseMessage::DragLine => {
-                state.highlight = None;
-                self.cache.clear();
-            }
             CameraPoseMessage::HighlightLine { highlight } => {
                 state.highlight = highlight;
                 self.cache.clear();
@@ -123,9 +117,6 @@ where
                     };
                     self.cache.clear();
                 }
-            }
-            CameraPoseMessage::Redraw => {
-                self.cache.clear();
             }
             CameraPoseMessage::MoveControlPoint { cursor } => {
                 self.axis_data.borrow_mut().control_point = cursor;
@@ -183,19 +174,22 @@ where
                         }
                     };
                     self.cache.clear();
+                    (Status::Captured, None)
+                } else {
+                    (Status::Ignored, None)
                 }
-                (Status::Ignored, None)
             }
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                 match &state.edit_state {
                     Edit::ControlPoint => {
                         state.edit_state = Edit::None;
-                        (Status::Captured, Some(CameraPoseMessage::Redraw))
+                        self.cache.clear();
+                        (Status::Ignored, None)
                     }
                     Edit::None => {
                         if state.edit.is_some() {
                             (
-                                Status::Captured,
+                                Status::Ignored,
                                 Some(CameraPoseMessage::Editline { component: None }),
                             )
                         } else if let Some(line_index) = state.highlight {
@@ -203,21 +197,21 @@ where
                             let clicked_position = scale_cursor;
                             if should_edit_point(clicked_position, p1) {
                                 (
-                                    Status::Captured,
+                                    Status::Ignored,
                                     Some(CameraPoseMessage::Editline {
                                         component: Some(Component::A),
                                     }),
                                 )
                             } else if should_edit_point(clicked_position, p2) {
                                 (
-                                    Status::Captured,
+                                    Status::Ignored,
                                     Some(CameraPoseMessage::Editline {
                                         component: Some(Component::B),
                                     }),
                                 )
                             } else {
                                 (
-                                    Status::Captured,
+                                    Status::Ignored,
                                     Some(CameraPoseMessage::HighlightLine { highlight: None }),
                                 )
                             }
@@ -235,7 +229,8 @@ where
                     scale_cursor,
                 ) {
                     state.edit_state = Edit::ControlPoint;
-                    return (Status::Captured, Some(CameraPoseMessage::Redraw));
+                    self.cache.clear();
+                    return (Status::Ignored, None);
                 } else {
                     for (index, (p1, p2)) in self.axis_data.borrow().axis_lines.iter().enumerate() {
                         if check_if_point_is_from_line(p1, p2, scale_cursor) {
@@ -250,7 +245,7 @@ where
                 }
                 state.edit_state = Edit::None;
                 (
-                    Status::Captured,
+                    Status::Ignored,
                     Some(CameraPoseMessage::HighlightLine { highlight: None }),
                 )
             }
@@ -262,9 +257,7 @@ where
                     }),
                 ),
                 Edit::None => {
-                    if state.is_second_point {
-                        (Status::Captured, Some(CameraPoseMessage::DragLine))
-                    } else if !state.is_alt {
+                    if !state.is_alt {
                         (
                             Status::Captured,
                             Some(CameraPoseMessage::EditEndpoint {
@@ -287,7 +280,7 @@ where
         renderer: &Renderer,
         _theme: &Theme,
         bounds: Rectangle,
-        cursor: mouse::Cursor,
+        _cursor: mouse::Cursor,
     ) -> Vec<Renderer::Geometry> {
         let color_red = Color::from_rgba(0.8, 0.2, 0.2, 0.8);
         let color_green = Color::from_rgba(0.2, 0.8, 0.2, 0.8);
@@ -420,15 +413,6 @@ where
                 }
             }
 
-            if state.is_second_point {
-                let p1 = state.first_point;
-                if let Some(current_cursor_position) = cursor.position() {
-                    let p2 = current_cursor_position;
-                    let p1 = scale_point_to_canvas(&Point::new(p1.x, p1.y), bounds.size());
-                    builder.move_to(p1);
-                    builder.line_to(p2);
-                }
-            }
             let path = builder.build();
             frame.stroke(
                 &path,
@@ -539,7 +523,7 @@ where
         cursor: mouse::Cursor,
         _renderer: &Renderer,
         _clipboard: &mut dyn Clipboard,
-        _shell: &mut Shell<'_, Message>,
+        shell: &mut Shell<'_, Message>,
         _viewport: &Rectangle,
     ) {
         let bounds = layout.bounds();
@@ -554,6 +538,9 @@ where
         //if let Some(message) = message {
         //    shell.publish(message);
         //}
+        if let Status::Captured = event_status {
+            shell.request_redraw();
+        }
     }
 
     fn mouse_interaction(
@@ -601,7 +588,6 @@ where
 pub struct State {
     pub first_point: Point,
     pub selected: usize,
-    pub is_second_point: bool,
     pub highlight: Option<usize>,
     pub edit: Option<Component>,
     pub image_path: String,
