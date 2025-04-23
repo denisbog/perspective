@@ -119,23 +119,29 @@ where
                             self.custom_origin_translation
                                 .replace(self.draw_lines.borrow().get(index).copied());
                             self.draw_cache.clear();
-                            return (Status::Ignored, None);
+                            return (Status::Captured, None);
                         };
                     }
-
-                    state
+                    if state
                         .points
                         .borrow()
                         .windows(2)
                         .enumerate()
-                        .for_each(|(index, items)| {
+                        .find(|(_index, items)| {
                             let start = items[0];
                             let end = items[1];
-                            if check_if_point_is_from_line_new(&start, &end, cursor) {
-                                self.custom_scale_segment.borrow_mut().replace(index);
-                                self.draw_cache.clear();
-                            }
-                        });
+                            check_if_point_is_from_line_new(&start, &end, cursor)
+                        })
+                        .map(|(index, _items)| {
+                            self.custom_scale_segment.borrow_mut().replace(index);
+                            self.draw_cache.clear();
+                        })
+                        .iter()
+                        .count()
+                        > 0
+                    {
+                        return (Status::Captured, None);
+                    }
                 }
                 if let Edit::MarkError(_axis) = &state.edit_state {
                     let cursor = Point::new(adjusted_cursor.x, adjusted_cursor.y);
@@ -213,45 +219,45 @@ where
                         "r" => match state.edit_state {
                             Edit::Extrude(_) => {
                                 state.edit_state = Edit::Extrude(EditAxis::EditX);
-                                (Status::Ignored, None)
+                                (Status::Captured, None)
                             }
                             Edit::Scale(_) => {
                                 state.edit_state = Edit::Scale(EditAxis::EditX);
-                                (Status::Ignored, None)
+                                (Status::Captured, None)
                             }
                             Edit::MarkError(_) => {
                                 state.edit_state = Edit::MarkError(EditAxis::EditX);
-                                (Status::Ignored, None)
+                                (Status::Captured, None)
                             }
                             _ => (Status::Ignored, None),
                         },
                         "s" => match state.edit_state {
                             Edit::Extrude(_) => {
                                 state.edit_state = Edit::Extrude(EditAxis::EditY);
-                                (Status::Ignored, None)
+                                (Status::Captured, None)
                             }
                             Edit::Scale(_) => {
                                 state.edit_state = Edit::Scale(EditAxis::EditY);
-                                (Status::Ignored, None)
+                                (Status::Captured, None)
                             }
                             Edit::MarkError(_) => {
                                 state.edit_state = Edit::MarkError(EditAxis::EditY);
-                                (Status::Ignored, None)
+                                (Status::Captured, None)
                             }
                             _ => (Status::Ignored, None),
                         },
                         "t" => match state.edit_state {
                             Edit::Extrude(_) => {
                                 state.edit_state = Edit::Extrude(EditAxis::EditZ);
-                                (Status::Ignored, None)
+                                (Status::Captured, None)
                             }
                             Edit::Scale(_) => {
                                 state.edit_state = Edit::Scale(EditAxis::EditZ);
-                                (Status::Ignored, None)
+                                (Status::Captured, None)
                             }
                             Edit::MarkError(_) => {
                                 state.edit_state = Edit::MarkError(EditAxis::EditZ);
-                                (Status::Ignored, None)
+                                (Status::Captured, None)
                             }
                             _ => (Status::Ignored, None),
                         },

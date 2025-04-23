@@ -303,7 +303,6 @@ impl Perspective {
                 } else {
                     scale
                 };
-                trace!("main scale {}", scale);
                 self.axis_data.as_ref().unwrap().borrow_mut().custom_scale = Some(scale);
                 self.custom_scale.replace(None);
                 self.custom_scale_segment.replace(None);
