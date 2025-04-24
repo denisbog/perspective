@@ -3,7 +3,8 @@ use clap::{Parser, command};
 use iced::Alignment::Center;
 use iced::Length::Fill;
 use iced::futures::executor::block_on;
-use iced::widget::{button, center, column, image, row, scrollable, stack, text};
+use iced::widget::scrollable::{Direction, Scrollbar};
+use iced::widget::{button, center, column, image, row, scrollable, slider, stack, text};
 use iced::{Element, Length, Point, Size, Task, Theme};
 use nalgebra::{Vector2, Vector3};
 use perspective::camera_pose::ComputeCameraPose;
@@ -22,7 +23,6 @@ use std::path::Path;
 use std::rc::Rc;
 use tracing::{trace, warn};
 use tracing_subscriber::EnvFilter;
-use zoomer::zoom_viewer::zoomer;
 
 use anyhow::Result;
 #[derive(Parser, Debug)]
@@ -74,6 +74,7 @@ enum Message {
     ExportToFSpy,
     Optimize,
     OptimizeForError,
+    ZoomChanged(f32),
 }
 
 #[derive(Default)]
@@ -92,6 +93,7 @@ struct Perspective {
     custom_scale_segment: Rc<RefCell<Option<usize>>>,
     custom_scale: Rc<RefCell<Option<PointInformation<f32>>>>,
     custom_error: Rc<RefCell<Option<PointInformation<f32>>>>,
+    zoom: f32,
 }
 #[derive(Debug, Clone)]
 struct ImageData {
@@ -153,6 +155,7 @@ impl Perspective {
             images: args.images,
             export_file_name,
             points_file_name: points.clone(),
+            zoom: 0.5,
             ..Self::default()
         };
         (
@@ -406,6 +409,7 @@ impl Perspective {
                 };
                 self.update(Message::CalculatePose);
             }
+            Message::ZoomChanged(zoom) => self.zoom = zoom,
         }
     }
     fn view(&self) -> Element<Message> {
@@ -586,12 +590,26 @@ impl Perspective {
             }
         }
 
+        buttons.push(
+            slider(0.25f32..=1.0, self.zoom, Message::ZoomChanged)
+                .step(0.05)
+                .into(),
+        );
+
         column!(
             row!(
-                column!(stack!(
-                    zoomer(self.images.get(self.selected_image as usize).unwrap()).scale(2.0),
-                    component,
-                ),)
+                column!(
+                    scrollable(stack!(
+                        image(self.images.get(self.selected_image as usize).unwrap())
+                            .width(self.image_size.width * self.zoom)
+                            .height(self.image_size.height * self.zoom),
+                        component,
+                    ))
+                    .direction(Direction::Both {
+                        vertical: Scrollbar::default(),
+                        horizontal: Scrollbar::default(),
+                    }),
+                )
                 .width(Length::Fill),
                 column!(scrollable(
                     column(self.images.iter().enumerate().map(|(index, item)| {
@@ -610,7 +628,7 @@ impl Perspective {
                 .width(300)
             )
             .height(Length::Fill)
-            .padding(50),
+            .padding(10),
             row(buttons).width(Length::Fill).padding(10).spacing(5)
         )
         .into()
