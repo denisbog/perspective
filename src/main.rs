@@ -4,7 +4,9 @@ use iced::Alignment::Center;
 use iced::Length::Fill;
 use iced::futures::executor::block_on;
 use iced::widget::scrollable::{Direction, Scrollbar};
-use iced::widget::{button, center, column, image, row, scrollable, slider, stack, text};
+use iced::widget::{
+    button, center, column, image, mouse_area, row, scrollable, slider, stack, text,
+};
 use iced::{Element, Length, Point, Size, Task, Theme};
 use nalgebra::{Vector2, Vector3};
 use perspective::camera_pose::ComputeCameraPose;
@@ -613,13 +615,19 @@ impl Perspective {
                 .width(Length::Fill),
                 column!(scrollable(
                     column(self.images.iter().enumerate().map(|(index, item)| {
-                        button(
+                        let opacity = if index as u8 == self.selected_image {
+                            1.0
+                        } else {
+                            0.4
+                        };
+                        mouse_area(
                             image(item)
                                 .content_fit(iced::ContentFit::Cover)
                                 .width(280)
-                                .height(200),
+                                .height(200)
+                                .opacity(opacity),
                         )
-                        .on_press_with(move || Message::SelectImage(index as u8))
+                        .on_press(Message::SelectImage(index as u8))
                         .into()
                     }))
                     .padding(20)
