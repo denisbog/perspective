@@ -5,7 +5,7 @@ use iced::Length::Fill;
 use iced::futures::executor::block_on;
 use iced::widget::scrollable::{Direction, Scrollbar};
 use iced::widget::{
-    button, center, column, image, mouse_area, row, scrollable, slider, stack, text,
+    center, column, container, image, mouse_area, row, scrollable, slider, stack, text,
 };
 use iced::{Element, Length, Point, Size, Task, Theme};
 use nalgebra::{Vector2, Vector3};
@@ -25,8 +25,10 @@ use std::path::Path;
 use std::rc::Rc;
 use tracing::{trace, warn};
 use tracing_subscriber::EnvFilter;
+use zoomer::context_menu::ContextMenu;
 
 use anyhow::Result;
+
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
@@ -261,6 +263,7 @@ impl Perspective {
                     return;
                 };
                 axis_data.borrow_mut().flip = (flip_x, flip_y, flip_z);
+                self.update(Message::CalculatePose);
             }
             Message::ApplyTranslation => {
                 let Some(custom_origin_translation) = *self.custom_origin_translation.borrow()
@@ -463,181 +466,189 @@ impl Perspective {
             .height(Length::Fill)
             .into(),
         };
-        let mut buttons = Vec::new();
-        match self.mode {
-            UiMod::Pose => {
-                buttons.push(
-                    button("Try")
-                        .on_press(Message::ChangeMode(UiMod::Try))
-                        .into(),
-                );
-                buttons.push(
-                    button("Draw lines")
-                        .on_press(Message::ChangeMode(UiMod::Draw))
-                        .into(),
-                );
-                buttons.push(
-                    button("Scale/Translation")
-                        .on_press(Message::ChangeMode(UiMod::Scale))
-                        .into(),
-                );
-                buttons.push(
-                    button("Perform calculations")
-                        .on_press(Message::CalculatePose)
-                        .into(),
-                );
-                buttons.push(
-                    button("Flip X")
-                        .on_press(Message::Flip(
-                            !axis_data.as_ref().borrow().flip.0,
-                            axis_data.as_ref().borrow().flip.1,
-                            axis_data.as_ref().borrow().flip.2,
-                        ))
-                        .into(),
-                );
-                buttons.push(
-                    button("Flip Y")
-                        .on_press(Message::Flip(
-                            axis_data.as_ref().borrow().flip.0,
-                            !axis_data.as_ref().borrow().flip.1,
-                            axis_data.as_ref().borrow().flip.2,
-                        ))
-                        .into(),
-                );
-                buttons.push(
-                    button("Flip Z")
-                        .on_press(Message::Flip(
-                            axis_data.as_ref().borrow().flip.0,
-                            axis_data.as_ref().borrow().flip.1,
-                            !axis_data.as_ref().borrow().flip.2,
-                        ))
-                        .into(),
-                );
-                buttons.push(
-                    button("Export Pose To FSpy")
-                        .on_press(Message::ExportToFSpy)
-                        .into(),
-                );
-                buttons.push(button("Save lines").on_press(Message::Save).into());
-                buttons.push(button("Optimize").on_press(Message::Optimize).into());
-            }
-            UiMod::Scale => {
-                buttons.push(
-                    button("Pose")
-                        .on_press(Message::ChangeMode(UiMod::Pose))
-                        .into(),
-                );
-                buttons.push(
-                    button("Draw lines")
-                        .on_press(Message::ChangeMode(UiMod::Draw))
-                        .into(),
-                );
-                //if self.custom_scale.borrow().is_some() {
-                buttons.push(button("Apply Scale").on_press(Message::ApplyScale).into());
-                //} else {
-                buttons.push(button("Reset Scale").on_press(Message::ResetScale).into());
-                //}
 
-                //if self.custom_origin_translation.borrow().is_some() {
-                buttons.push(
-                    button("Apply Translation")
-                        .on_press(Message::ApplyTranslation)
-                        .into(),
-                );
-                //} else {
-                buttons.push(
-                    button("Reset Translation")
-                        .on_press(Message::ResetTranslation)
-                        .into(),
-                );
-                //}
-                buttons.push(
-                    button("Export Pose To FSpy")
-                        .on_press(Message::ExportToFSpy)
-                        .into(),
-                );
-                buttons.push(button("Save lines").on_press(Message::Save).into());
-                buttons.push(button("Load lines").on_press(Message::LoadLines).into());
-            }
-            UiMod::Draw => {
-                buttons.push(
-                    button("Pose")
-                        .on_press(Message::ChangeMode(UiMod::Pose))
-                        .into(),
-                );
-                buttons.push(
-                    button("Scale/Translation")
-                        .on_press(Message::ChangeMode(UiMod::Scale))
-                        .into(),
-                );
-                buttons.push(button("Save lines").on_press(Message::Save).into());
-                buttons.push(button("Load lines").on_press(Message::LoadLines).into());
-                buttons.push(
-                    button("Optimize Error")
-                        .on_press(Message::OptimizeForError)
-                        .into(),
-                );
-            }
-            UiMod::Try => {
-                buttons.push(
-                    button("Pose")
-                        .on_press(Message::ChangeMode(UiMod::Pose))
-                        .into(),
-                );
-                buttons.push(
-                    button("Scale/Translation")
-                        .on_press(Message::ChangeMode(UiMod::Scale))
-                        .into(),
-                );
-            }
-        }
+        let canvas = scrollable(stack!(
+            image(self.images.get(self.selected_image as usize).unwrap())
+                .width(self.image_size.width * self.zoom)
+                .height(self.image_size.height * self.zoom),
+            component,
+        ))
+        .direction(Direction::Both {
+            vertical: Scrollbar::default(),
+            horizontal: Scrollbar::default(),
+        });
 
-        buttons.push(
-            slider(0.25f32..=1.0, self.zoom, Message::ZoomChanged)
-                .step(0.05)
-                .into(),
-        );
+        let canvas_with_context_menu = ContextMenu::new(canvas, move || {
+            let mut buttons = Vec::new();
+            match self.mode {
+                UiMod::Pose => {
+                    buttons.push(
+                        mouse_area("Try")
+                            .on_press(Message::ChangeMode(UiMod::Try))
+                            .into(),
+                    );
+                    buttons.push(
+                        mouse_area("Draw lines")
+                            .on_press(Message::ChangeMode(UiMod::Draw))
+                            .into(),
+                    );
+                    buttons.push(
+                        mouse_area("Scale/Translation")
+                            .on_press(Message::ChangeMode(UiMod::Scale))
+                            .into(),
+                    );
+                    buttons.push(
+                        mouse_area("Perform calculations")
+                            .on_press(Message::CalculatePose)
+                            .into(),
+                    );
+                    buttons.push(
+                        mouse_area("Flip X")
+                            .on_press(Message::Flip(
+                                !axis_data.as_ref().borrow().flip.0,
+                                axis_data.as_ref().borrow().flip.1,
+                                axis_data.as_ref().borrow().flip.2,
+                            ))
+                            .into(),
+                    );
+                    buttons.push(
+                        mouse_area("Flip Y")
+                            .on_press(Message::Flip(
+                                axis_data.as_ref().borrow().flip.0,
+                                !axis_data.as_ref().borrow().flip.1,
+                                axis_data.as_ref().borrow().flip.2,
+                            ))
+                            .into(),
+                    );
+                    buttons.push(
+                        mouse_area("Flip Z")
+                            .on_press(Message::Flip(
+                                axis_data.as_ref().borrow().flip.0,
+                                axis_data.as_ref().borrow().flip.1,
+                                !axis_data.as_ref().borrow().flip.2,
+                            ))
+                            .into(),
+                    );
+                    buttons.push(
+                        mouse_area("Export Pose To FSpy")
+                            .on_press(Message::ExportToFSpy)
+                            .into(),
+                    );
+                    buttons.push(mouse_area("Save lines").on_press(Message::Save).into());
+                    buttons.push(mouse_area("Optimize").on_press(Message::Optimize).into());
+                }
+                UiMod::Scale => {
+                    buttons.push(
+                        mouse_area("Pose")
+                            .on_press(Message::ChangeMode(UiMod::Pose))
+                            .into(),
+                    );
+                    buttons.push(
+                        mouse_area("Draw lines")
+                            .on_press(Message::ChangeMode(UiMod::Draw))
+                            .into(),
+                    );
+                    //if self.custom_scale.borrow().is_some() {
+                    buttons.push(
+                        mouse_area("Apply Scale")
+                            .on_press(Message::ApplyScale)
+                            .into(),
+                    );
+                    //} else {
+                    buttons.push(
+                        mouse_area("Reset Scale")
+                            .on_press(Message::ResetScale)
+                            .into(),
+                    );
+                    //}
+
+                    //if self.custom_origin_translation.borrow().is_some() {
+                    buttons.push(
+                        mouse_area("Apply Translation")
+                            .on_press(Message::ApplyTranslation)
+                            .into(),
+                    );
+                    //} else {
+                    buttons.push(
+                        mouse_area("Reset Translation")
+                            .on_press(Message::ResetTranslation)
+                            .into(),
+                    );
+                    //}
+                    buttons.push(
+                        mouse_area("Export Pose To FSpy")
+                            .on_press(Message::ExportToFSpy)
+                            .into(),
+                    );
+                    buttons.push(mouse_area("Save lines").on_press(Message::Save).into());
+                    buttons.push(mouse_area("Load lines").on_press(Message::LoadLines).into());
+                }
+                UiMod::Draw => {
+                    buttons.push(
+                        mouse_area("Pose")
+                            .on_press(Message::ChangeMode(UiMod::Pose))
+                            .into(),
+                    );
+                    buttons.push(
+                        mouse_area("Scale/Translation")
+                            .on_press(Message::ChangeMode(UiMod::Scale))
+                            .into(),
+                    );
+                    buttons.push(mouse_area("Save lines").on_press(Message::Save).into());
+                    buttons.push(mouse_area("Load lines").on_press(Message::LoadLines).into());
+                    buttons.push(
+                        mouse_area("Optimize Error")
+                            .on_press(Message::OptimizeForError)
+                            .into(),
+                    );
+                }
+                UiMod::Try => {
+                    buttons.push(
+                        mouse_area("Pose")
+                            .on_press(Message::ChangeMode(UiMod::Pose))
+                            .into(),
+                    );
+                    buttons.push(
+                        mouse_area("Scale/Translation")
+                            .on_press(Message::ChangeMode(UiMod::Scale))
+                            .into(),
+                    );
+                }
+            }
+            column(buttons).padding(5).spacing(5).into()
+        });
 
         column!(
             row!(
+                column!(canvas_with_context_menu).width(Length::Fill),
                 column!(
-                    scrollable(stack!(
-                        image(self.images.get(self.selected_image as usize).unwrap())
-                            .width(self.image_size.width * self.zoom)
-                            .height(self.image_size.height * self.zoom),
-                        component,
-                    ))
-                    .direction(Direction::Both {
-                        vertical: Scrollbar::default(),
-                        horizontal: Scrollbar::default(),
-                    }),
+                    container(slider(0.25f32..=1.0f32, self.zoom, Message::ZoomChanged).step(0.05))
+                        .padding(20),
+                    scrollable(
+                        column(self.images.iter().enumerate().map(|(index, item)| {
+                            let opacity = if index as u8 == self.selected_image {
+                                1.0
+                            } else {
+                                0.4
+                            };
+                            mouse_area(
+                                image(item)
+                                    .content_fit(iced::ContentFit::Cover)
+                                    .width(280)
+                                    .height(200)
+                                    .opacity(opacity),
+                            )
+                            .on_press(Message::SelectImage(index as u8))
+                            .into()
+                        }))
+                        .spacing(20)
+                        .padding(20)
+                    )
                 )
-                .width(Length::Fill),
-                column!(scrollable(
-                    column(self.images.iter().enumerate().map(|(index, item)| {
-                        let opacity = if index as u8 == self.selected_image {
-                            1.0
-                        } else {
-                            0.4
-                        };
-                        mouse_area(
-                            image(item)
-                                .content_fit(iced::ContentFit::Cover)
-                                .width(280)
-                                .height(200)
-                                .opacity(opacity),
-                        )
-                        .on_press(Message::SelectImage(index as u8))
-                        .into()
-                    }))
-                    .padding(20)
-                    .spacing(20)
-                ))
                 .width(300)
             )
             .height(Length::Fill)
             .padding(10),
-            row(buttons).width(Length::Fill).padding(10).spacing(5)
         )
         .into()
     }

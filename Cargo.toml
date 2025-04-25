@@ -11,28 +11,29 @@ path = "src/lib.rs"
 
 
 [dependencies]
-anyhow = "1.0.96"
-clap = { version = "4.5.30", features = ["derive"] }
+anyhow = "1.0.98"
+clap = { version = "4.5.37", features = ["derive"] }
 iced.workspace = true
-image = "0.25.5"
+image = "0.25.6"
 nalgebra = "0.33.2"
 num-traits = "0.2.19"
 optimization = "0.2.0"
-serde = { version = "1.0.218", features = ["serde_derive"] }
-serde_json = "1.0.139"
-tokio = { version = "1.43.0", features = ["fs", "io-util", "macros", "rt"] }
-tokio-util = { version = "0.7.13", features = ["codec"] }
+serde = { version = "1.0.219", features = ["serde_derive"] }
+serde_json = "1.0.140"
+tokio = { version = "1.44.2", features = ["fs", "io-util", "macros", "rt"] }
+tokio-util = { version = "0.7.15", features = ["codec"] }
 tracing = "0.1.41"
 
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 zoomer = {path = "components/zoomer"}
-
-
+iced_renderer = { version = "0.13", features = ["wgpu"] }
 [workspace]
 members=["components/*"]
 
 [workspace.dependencies]
 iced = { git = "https://github.com/iced-rs/iced.git", branch = "master", features = ["debug", "tokio", "canvas", "image", "advanced"] }
+iced_renderer = { git = "https://github.com/iced-rs/iced.git", branch = "master", features = ["wgpu"] }
+#iced = { version = "0.13.1", features = ["debug", "tokio", "canvas", "image", "advanced", "tiny-skia"] }
 tracing = "0.1.41"
 
 #[profile.dev.package."*"]

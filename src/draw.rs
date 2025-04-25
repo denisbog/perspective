@@ -326,7 +326,7 @@ where
 
                         frame.fill_text(Text {
                             content: format!(
-                                "{:>7.2},{:>7.2},{:>7.2}",
+                                "{:>7.3},{:>7.3},{:>7.3}",
                                 location3d.x, location3d.y, location3d.z
                             ),
                             position: Point::new(end.x + 4.0, end.y + 4.0),
@@ -341,7 +341,7 @@ where
                     &path,
                     Stroke {
                         style: canvas::Style::Solid(Color::from_rgba(0.8, 0.8, 0.8, 0.8)),
-                        width: 1.5,
+                        width: 2.0,
                         ..Stroke::default()
                     },
                 );
@@ -482,7 +482,7 @@ where
             let mut builder = canvas::path::Builder::new();
             frame.fill_text(Text {
                 content: format!(
-                    "{:>5.2},\n{:>5.2},\n{:>5.2}",
+                    "{:>5.3},\n{:>5.3},\n{:>5.3}",
                     new_point_3d.x, new_point_3d.y, new_point_3d.z
                 ),
                 position: Point::new(new_point.x + 8.0, new_point.y + 8.0),

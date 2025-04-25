@@ -14,7 +14,7 @@ use iced::{
     },
     event::Status,
     mouse::ScrollDelta,
-    widget::canvas::{self, Event, Stroke, Text},
+    widget::canvas::{self, Event, Stroke},
 };
 use nalgebra::{Matrix3, Perspective3, Point2, Vector2, Vector3};
 
@@ -211,7 +211,7 @@ where
                                 )
                             } else {
                                 (
-                                    Status::Ignored,
+                                    Status::Captured,
                                     Some(CameraPoseMessage::HighlightLine { highlight: None }),
                                 )
                             }
@@ -243,9 +243,15 @@ where
                         };
                     }
                 }
+
+                let is_captured = if state.highlight.is_some() {
+                    Status::Captured
+                } else {
+                    Status::Ignored
+                };
                 state.edit_state = Edit::None;
                 (
-                    Status::Ignored,
+                    is_captured,
                     Some(CameraPoseMessage::HighlightLine { highlight: None }),
                 )
             }
@@ -295,11 +301,6 @@ where
                 builder.move_to(p1);
                 builder.line_to(p2);
 
-                frame.fill_text(Text {
-                    content: format!("{}", highlight),
-                    position: Point::new((p1.x + p2.x) / 2f32, (p1.y + p2.y) / 2f32),
-                    ..Default::default()
-                });
                 builder.circle(p1, 5f32);
                 builder.circle(p2, 5f32);
 
@@ -535,10 +536,8 @@ where
             self.handle_internal_event(state, message);
         }
 
-        //if let Some(message) = message {
-        //    shell.publish(message);
-        //}
         if let Status::Captured = event_status {
+            shell.capture_event();
             shell.request_redraw();
         }
     }
