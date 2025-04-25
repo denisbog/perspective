@@ -230,7 +230,7 @@ where
                 ) {
                     state.edit_state = Edit::ControlPoint;
                     self.cache.clear();
-                    return (Status::Ignored, None);
+                    return (Status::Captured, None);
                 } else {
                     for (index, (p1, p2)) in self.axis_data.borrow().axis_lines.iter().enumerate() {
                         if check_if_point_is_from_line(p1, p2, scale_cursor) {
