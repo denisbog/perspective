@@ -138,16 +138,15 @@ where
             viewport,
         );
 
-        if !shell.is_event_captured() {
-            if *event == Event::Mouse(mouse::Event::ButtonPressed(Button::Right)) {
-                let bounds = layout.bounds();
+        if !shell.is_event_captured()
+            && *event == Event::Mouse(mouse::Event::ButtonPressed(Button::Right))
+        {
+            let bounds = layout.bounds();
 
-                if cursor.is_over(bounds) {
-                    let s: &mut State = state.state.downcast_mut();
-                    s.cursor_position = cursor.position().unwrap_or_default();
-                    s.show = !s.show;
-                    return;
-                }
+            if cursor.is_over(bounds) {
+                let s: &mut State = state.state.downcast_mut();
+                s.cursor_position = cursor.position().unwrap_or_default();
+                s.show = !s.show;
             }
         }
     }

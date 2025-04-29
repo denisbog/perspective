@@ -11,8 +11,8 @@ use iced::{Element, Length, Point, Size, Task, Theme};
 use nalgebra::{Vector2, Vector3};
 use perspective::camera_pose::ComputeCameraPose;
 use perspective::compute::{
-    ComputeSolution, Lines, StoreLine, StorePoint, StorePoint3d, compute_ui_adapter,
-    read_points_from_file, store_scene_data_to_file,
+    ComputeSolution, Lines, StoreLine, StorePoint, StorePoint3d, compute_camera_pose_scale,
+    compute_ui_adapter, read_points_from_file, store_scene_data_to_file,
 };
 use perspective::draw::DrawLine;
 use perspective::optimize::{ortho_center_optimize, pose_optimize};
@@ -34,6 +34,8 @@ use anyhow::Result;
 struct Args {
     #[arg(short, long)]
     points: Option<String>,
+    #[arg(short, long)]
+    dimension: Option<f32>,
     #[arg(short, long, value_delimiter = ' ', num_args = 1.., default_value = "perspective.jpg")]
     images: Vec<String>,
 }
@@ -79,6 +81,7 @@ enum Message {
     Optimize,
     OptimizeForError,
     ZoomChanged(f32),
+    ScaleToDimension,
 }
 
 #[derive(Default)]
@@ -98,6 +101,7 @@ struct Perspective {
     custom_scale: Rc<RefCell<Option<PointInformation<f32>>>>,
     custom_error: Rc<RefCell<Option<PointInformation<f32>>>>,
     zoom: f32,
+    dimension: Option<f32>,
 }
 #[derive(Debug, Clone)]
 struct ImageData {
@@ -153,6 +157,7 @@ impl Perspective {
             args.points.unwrap()
         };
         let export_file_name = format!("{}.fspy", image_name);
+        let dimension = args.dimension;
         let init = Perspective {
             image_path: first_image.clone(),
             draw_lines,
@@ -160,6 +165,7 @@ impl Perspective {
             export_file_name,
             points_file_name: points.clone(),
             zoom: 0.5,
+            dimension,
             ..Self::default()
         };
         (
@@ -217,6 +223,27 @@ impl Perspective {
                     )
                     .unwrap(),
                 );
+            }
+            Message::ScaleToDimension => {
+                if self.compute_solution.is_some() {
+                    let Some(custom_scale) = self.custom_scale.borrow().clone() else {
+                        return;
+                    };
+                    let solution = self.compute_solution.clone().unwrap();
+                    self.compute_solution = if let Some(scale) = self.dimension {
+                        let scale =
+                            (custom_scale.source_vector - custom_scale.vector).norm() / scale;
+                        self.axis_data
+                            .as_mut()
+                            .unwrap()
+                            .borrow_mut()
+                            .custom_scale
+                            .replace(scale);
+                        compute_camera_pose_scale(solution, scale).ok()
+                    } else {
+                        Some(solution)
+                    };
+                };
             }
             Message::LoadApplicationState {
                 image_data,
@@ -483,27 +510,27 @@ impl Perspective {
             match self.mode {
                 UiMod::Pose => {
                     buttons.push(
-                        mouse_area("Try")
+                        mouse_area(container("Try").width(Length::Fill))
                             .on_press(Message::ChangeMode(UiMod::Try))
                             .into(),
                     );
                     buttons.push(
-                        mouse_area("Draw lines")
+                        mouse_area(container("Draw lines").width(Length::Fill))
                             .on_press(Message::ChangeMode(UiMod::Draw))
                             .into(),
                     );
                     buttons.push(
-                        mouse_area("Scale/Translation")
+                        mouse_area(container("Scale/Translation").width(Length::Fill))
                             .on_press(Message::ChangeMode(UiMod::Scale))
                             .into(),
                     );
                     buttons.push(
-                        mouse_area("Perform calculations")
+                        mouse_area(container("Perform calculations").width(Length::Fill))
                             .on_press(Message::CalculatePose)
                             .into(),
                     );
                     buttons.push(
-                        mouse_area("Flip X")
+                        mouse_area(container("Flip X").width(Length::Fill))
                             .on_press(Message::Flip(
                                 !axis_data.as_ref().borrow().flip.0,
                                 axis_data.as_ref().borrow().flip.1,
@@ -512,7 +539,7 @@ impl Perspective {
                             .into(),
                     );
                     buttons.push(
-                        mouse_area("Flip Y")
+                        mouse_area(container("Flip Y").width(Length::Fill))
                             .on_press(Message::Flip(
                                 axis_data.as_ref().borrow().flip.0,
                                 !axis_data.as_ref().borrow().flip.1,
@@ -521,7 +548,7 @@ impl Perspective {
                             .into(),
                     );
                     buttons.push(
-                        mouse_area("Flip Z")
+                        mouse_area(container("Flip Z").width(Length::Fill))
                             .on_press(Message::Flip(
                                 axis_data.as_ref().borrow().flip.0,
                                 axis_data.as_ref().borrow().flip.1,
@@ -530,33 +557,46 @@ impl Perspective {
                             .into(),
                     );
                     buttons.push(
-                        mouse_area("Export Pose To FSpy")
+                        mouse_area(container("Export Pose To FSpy").width(Length::Fill))
                             .on_press(Message::ExportToFSpy)
                             .into(),
                     );
-                    buttons.push(mouse_area("Save lines").on_press(Message::Save).into());
-                    buttons.push(mouse_area("Optimize").on_press(Message::Optimize).into());
+                    buttons.push(
+                        mouse_area(container("Save lines").width(Length::Fill))
+                            .on_press(Message::Save)
+                            .into(),
+                    );
+                    buttons.push(
+                        mouse_area(container("Optimize").width(Length::Fill))
+                            .on_press(Message::Optimize)
+                            .into(),
+                    );
                 }
                 UiMod::Scale => {
                     buttons.push(
-                        mouse_area("Pose")
+                        mouse_area(container("Pose").width(Length::Fill))
                             .on_press(Message::ChangeMode(UiMod::Pose))
                             .into(),
                     );
                     buttons.push(
-                        mouse_area("Draw lines")
+                        mouse_area(container("Draw lines").width(Length::Fill))
                             .on_press(Message::ChangeMode(UiMod::Draw))
                             .into(),
                     );
                     //if self.custom_scale.borrow().is_some() {
                     buttons.push(
-                        mouse_area("Apply Scale")
+                        mouse_area(container("Apply Scale").width(Length::Fill))
                             .on_press(Message::ApplyScale)
+                            .into(),
+                    );
+                    buttons.push(
+                        mouse_area(container("Apply Scale to Dimension").width(Length::Fill))
+                            .on_press(Message::ScaleToDimension)
                             .into(),
                     );
                     //} else {
                     buttons.push(
-                        mouse_area("Reset Scale")
+                        mouse_area(container("Reset Scale").width(Length::Fill))
                             .on_press(Message::ResetScale)
                             .into(),
                     );
@@ -564,58 +604,74 @@ impl Perspective {
 
                     //if self.custom_origin_translation.borrow().is_some() {
                     buttons.push(
-                        mouse_area("Apply Translation")
+                        mouse_area(container("Apply Translation").width(Length::Fill))
                             .on_press(Message::ApplyTranslation)
                             .into(),
                     );
                     //} else {
                     buttons.push(
-                        mouse_area("Reset Translation")
+                        mouse_area(container("Reset Translation").width(Length::Fill))
                             .on_press(Message::ResetTranslation)
                             .into(),
                     );
                     //}
                     buttons.push(
-                        mouse_area("Export Pose To FSpy")
+                        mouse_area(container("Export Pose To FSpy").width(Length::Fill))
                             .on_press(Message::ExportToFSpy)
                             .into(),
                     );
-                    buttons.push(mouse_area("Save lines").on_press(Message::Save).into());
-                    buttons.push(mouse_area("Load lines").on_press(Message::LoadLines).into());
+                    buttons.push(
+                        mouse_area(container("Save lines").width(Length::Fill))
+                            .on_press(Message::Save)
+                            .into(),
+                    );
+                    buttons.push(
+                        mouse_area(container("Load lines").width(Length::Fill))
+                            .on_press(Message::LoadLines)
+                            .into(),
+                    );
                 }
                 UiMod::Draw => {
                     buttons.push(
-                        mouse_area("Pose")
+                        mouse_area(container("Pose").width(Length::Fill))
                             .on_press(Message::ChangeMode(UiMod::Pose))
                             .into(),
                     );
                     buttons.push(
-                        mouse_area("Scale/Translation")
+                        mouse_area(container("Scale/Translation").width(Length::Fill))
                             .on_press(Message::ChangeMode(UiMod::Scale))
                             .into(),
                     );
-                    buttons.push(mouse_area("Save lines").on_press(Message::Save).into());
-                    buttons.push(mouse_area("Load lines").on_press(Message::LoadLines).into());
                     buttons.push(
-                        mouse_area("Optimize Error")
+                        mouse_area(container("Save lines").width(Length::Fill))
+                            .on_press(Message::Save)
+                            .into(),
+                    );
+                    buttons.push(
+                        mouse_area(container("Load lines").width(Length::Fill))
+                            .on_press(Message::LoadLines)
+                            .into(),
+                    );
+                    buttons.push(
+                        mouse_area(container("Optimize Error").width(Length::Fill))
                             .on_press(Message::OptimizeForError)
                             .into(),
                     );
                 }
                 UiMod::Try => {
                     buttons.push(
-                        mouse_area("Pose")
+                        mouse_area(container("Pose").width(Length::Fill))
                             .on_press(Message::ChangeMode(UiMod::Pose))
                             .into(),
                     );
                     buttons.push(
-                        mouse_area("Scale/Translation")
+                        mouse_area(container("Scale/Translation").width(Length::Fill))
                             .on_press(Message::ChangeMode(UiMod::Scale))
                             .into(),
                     );
                 }
             }
-            column(buttons).padding(5).spacing(5).into()
+            column(buttons).width(300).padding(5).spacing(7).into()
         });
 
         column!(
