@@ -2,6 +2,7 @@ use ::image::ImageReader;
 use clap::{Parser, command};
 use iced::Alignment::Center;
 use iced::Length::Fill;
+use iced::alignment::{Horizontal, Vertical};
 use iced::futures::executor::block_on;
 use iced::widget::scrollable::{Direction, Scrollbar};
 use iced::widget::{
@@ -676,7 +677,11 @@ impl Perspective {
 
         column!(
             row!(
-                column!(canvas_with_context_menu).width(Length::Fill),
+                container(canvas_with_context_menu)
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .align_x(Horizontal::Center)
+                    .align_y(Vertical::Center),
                 column!(
                     container(slider(0.25f32..=1.0f32, self.zoom, Message::ZoomChanged).step(0.05))
                         .padding(20),

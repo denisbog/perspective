@@ -322,12 +322,13 @@ where
                         let end = items[1];
                         builder.move_to(start);
                         builder.line_to(end);
-                        let location3d = *self.draw_lines.borrow().get(index + 1).unwrap();
-
+                        let location3d_a = *self.draw_lines.borrow().get(index).unwrap();
+                        let location3d_b = *self.draw_lines.borrow().get(index + 1).unwrap();
+                        let distance = (location3d_b - location3d_a).norm();
                         frame.fill_text(Text {
                             content: format!(
-                                "{:>7.3},{:>7.3},{:>7.3}",
-                                location3d.x, location3d.y, location3d.z
+                                "{:>7.3},{:>7.3},{:>7.3} ({:.3})",
+                                location3d_b.x, location3d_b.y, location3d_b.z, distance
                             ),
                             position: Point::new(end.x + 4.0, end.y + 4.0),
                             color: Color::from_rgba(0.8, 0.8, 0.8, 0.8),
