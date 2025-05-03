@@ -16,7 +16,7 @@ use perspective::compute::{
     compute_ui_adapter, read_points_from_file, store_scene_data_to_file,
 };
 use perspective::draw::DrawLine;
-use perspective::optimize::{ortho_center_optimize, pose_optimize};
+use perspective::optimize::{ortho_center_optimize, ortho_center_optimize_x, pose_optimize};
 use perspective::{AxisData, PointInformation};
 use std::cell::RefCell;
 use std::fmt::Debug;
@@ -83,6 +83,7 @@ enum Message {
     OptimizeForError,
     ZoomChanged(f32),
     ScaleToDimension,
+    OptimizeX,
 }
 
 #[derive(Default)]
@@ -234,6 +235,7 @@ impl Perspective {
                     self.compute_solution = if let Some(scale) = self.dimension {
                         let scale =
                             (custom_scale.source_vector - custom_scale.vector).norm() / scale;
+                        *self.custom_scale.borrow_mut() = None;
                         self.axis_data
                             .as_mut()
                             .unwrap()
@@ -380,6 +382,32 @@ impl Perspective {
                     .collect();
                 if let Ok(lines) =
                     ortho_center_optimize(self.image_size.width / self.image_size.height, lines)
+                {
+                    axis_data.borrow_mut().axis_lines = lines
+                        .chunks(2)
+                        .map(|items| {
+                            (
+                                Point::new(items[0].x, items[0].y),
+                                Point::new(items[1].x, items[1].y),
+                            )
+                        })
+                        .collect();
+                    self.update(Message::CalculatePose);
+                };
+            }
+            Message::OptimizeX => {
+                let Some(axis_data) = &self.axis_data else {
+                    return;
+                };
+                let lines = axis_data
+                    .borrow()
+                    .axis_lines
+                    .iter()
+                    .cloned()
+                    .flat_map(|(a, b)| [Vector2::new(a.x, a.y), Vector2::new(b.x, b.y)])
+                    .collect();
+                if let Ok(lines) =
+                    ortho_center_optimize_x(self.image_size.width / self.image_size.height, lines)
                 {
                     axis_data.borrow_mut().axis_lines = lines
                         .chunks(2)
@@ -570,6 +598,11 @@ impl Perspective {
                     buttons.push(
                         mouse_area(container("Optimize").width(Length::Fill))
                             .on_press(Message::Optimize)
+                            .into(),
+                    );
+                    buttons.push(
+                        mouse_area(container("Optimize X axis").width(Length::Fill))
+                            .on_press(Message::OptimizeX)
                             .into(),
                     );
                 }
