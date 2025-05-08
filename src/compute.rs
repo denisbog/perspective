@@ -292,8 +292,8 @@ pub fn compute_camera_pose<
     //trace!("optimized focal length: {:?}", solution);
     //let focal_length = solution.position()[0];
 
-    let focal_length = (ortho_center - vanishing_points[0])
-        .dot(&(ortho_center - vanishing_points[1]))
+    let focal_length = (ortho_center - vanishing_points[1])
+        .dot(&(ortho_center - vanishing_points[2]))
         .abs()
         .sqrt();
 
@@ -303,6 +303,7 @@ pub fn compute_camera_pose<
     let y_rotation = Vector3::new(y_rotation.x, y_rotation.y, -focal_length).normalize();
     let z_rotation = vanishing_points[2] - ortho_center;
     let z_rotation = Vector3::new(z_rotation.x, z_rotation.y, -focal_length).normalize();
+    //let x_rotation = y_rotation.cross(&z_rotation);
     //let z_rotation = x_rotation.cross(&y_rotation);
     let rotation_matrix = Matrix3::from_columns(&[x_rotation, y_rotation, z_rotation]);
 

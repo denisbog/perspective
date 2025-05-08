@@ -76,6 +76,13 @@ pub fn ortho_center_optimize_x(ratio: f32, points: Vec<Vector2<f32>>) -> Result<
         .skip(4)
         .map(|items| Vector2::new(items[0], items[1]))
         .collect();
+    let points_xb: Vec<Vector2<f64>> = points
+        .chunks(2)
+        .skip(2)
+        .take(2)
+        .map(|items| Vector2::new(items[0], items[1]))
+        .collect();
+
     let vanishing_points = points_yz
         .chunks(4)
         .map(|lines| find_vanishing_point_for_lines(&lines[0], &lines[1], &lines[2], &lines[3]))
@@ -97,20 +104,28 @@ pub fn ortho_center_optimize_x(ratio: f32, points: Vec<Vector2<f32>>) -> Result<
                     .map(|items| Vector2::new(items[0], items[1]))
                     .collect();
 
-                let vanishing_points = points
-                    .chunks(4)
-                    .map(|lines| {
-                        find_vanishing_point_for_lines(&lines[0], &lines[1], &lines[2], &lines[3])
-                    })
-                    .collect::<Vec<Vector2<f64>>>();
+                //let vanishing_points = points
+                //    .chunks(4)
+                //    .map(|lines| {
+                //        find_vanishing_point_for_lines(&lines[0], &lines[1], &lines[2], &lines[3])
+                //    })
+                //    .collect::<Vec<Vector2<f64>>>();
 
-                let vanishing_points = vanishing_points
-                    .iter()
-                    .map(|point| relative_to_image_plane(ratio, point))
-                    .collect::<Vec<Vector2<f64>>>();
+                //let vanishing_points = vanishing_points
+                //    .iter()
+                //    .map(|point| relative_to_image_plane(ratio, point))
+                //    .collect::<Vec<Vector2<f64>>>();
+                //
+                let vanishing_point = find_vanishing_point_for_lines(
+                    &points[0],
+                    &points[1],
+                    &points_xb[0],
+                    &points_xb[1],
+                );
+                let vanishing_point = relative_to_image_plane(ratio, &vanishing_point);
 
                 let ortho_center = triangle_ortho_center(
-                    &vanishing_points[0],
+                    &vanishing_point,
                     &vanishing_points_yz[0],
                     &vanishing_points_yz[1],
                     //&vanishing_points[1],
@@ -119,14 +134,20 @@ pub fn ortho_center_optimize_x(ratio: f32, points: Vec<Vector2<f32>>) -> Result<
 
                 ortho_center.norm() as f64
             })),
-            points.iter().take(8).cloned().collect(),
+            points.iter().take(4).cloned().collect(),
         );
-
     let mut optimized_x: Vec<Vector2<f32>> = solution
         .position
         .chunks(2)
         .map(|items| Vector2::new(items[0] as f32, items[1] as f32))
         .collect();
+    optimized_x.extend(
+        points
+            .chunks(2)
+            .skip(2)
+            .take(2)
+            .map(|items| Vector2::new(items[0] as f32, items[1] as f32)),
+    );
     optimized_x.extend(
         points
             .chunks(2)

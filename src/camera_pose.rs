@@ -1,7 +1,9 @@
 use std::{cell::RefCell, f32, marker::PhantomData, rc::Rc};
 
 use iced::{
-    Color, Element, Length, Point, Rectangle, Size, Vector,
+    Color, Element,
+    Length::{self},
+    Pixels, Point, Rectangle, Size, Vector,
     advanced::{
         Clipboard, Layout, Shell, Widget,
         graphics::geometry::{self},
@@ -14,18 +16,18 @@ use iced::{
     },
     event::Status,
     mouse::ScrollDelta,
-    widget::canvas::{self, Event, Stroke},
+    widget::canvas::{self, Event, Fill, LineDash, Stroke, Text},
 };
 use nalgebra::{Matrix3, Perspective3, Point2, Vector2, Vector3};
 
 use crate::{
     AxisData, Component, Edit,
-    compute::ComputeSolution,
+    compute::{ComputeSolution, compute_ui_adapter},
     draw_decoration::{draw_grid_for_origin, draw_origin_with_axis, draw_vanishing_points},
     utils::{
-        check_if_control_point_is_clicked, check_if_point_is_from_line,
-        get_extension_for_line_within_bounds, scale_point, scale_point_to_canvas,
-        should_edit_point,
+        calculate_location_position_to_2d, check_if_control_point_is_clicked,
+        check_if_point_is_from_line, get_extension_for_line_within_bounds, scale_point,
+        scale_point_to_canvas, should_edit_point, to_canvas,
     },
 };
 
@@ -45,12 +47,14 @@ where
     message_: PhantomData<Message>,
     cache: geometry::Cache<Renderer>,
     axis_cache: geometry::Cache<Renderer>,
+    draw_cache: geometry::Cache<Renderer>,
 
     compute_solution: &'a Option<ComputeSolution<f32>>,
     renderer_: PhantomData<Renderer>,
     theme_: PhantomData<Theme>,
     axis_data: Rc<RefCell<AxisData>>,
     image_size: Size<f32>,
+    draw_lines: Rc<RefCell<Vec<Vector3<f32>>>>,
 }
 impl<'a, M, Theme, Renderer> ComputeCameraPose<'a, M, Theme, Renderer>
 where
@@ -59,6 +63,7 @@ where
     const DEFAULT_SIZE: f32 = 100.0;
     pub fn new(
         axis_data: Rc<RefCell<AxisData>>,
+        draw_lines: Rc<RefCell<Vec<Vector3<f32>>>>,
         compute_solution: &'a Option<ComputeSolution<f32>>,
     ) -> Self {
         ComputeCameraPose {
@@ -71,6 +76,8 @@ where
             theme_: PhantomData,
             cache: geometry::Cache::default(),
             axis_cache: geometry::Cache::default(),
+            draw_cache: geometry::Cache::default(),
+            draw_lines,
             image_size: Size::default(),
         }
     }
@@ -116,11 +123,13 @@ where
                         }
                     };
                     self.cache.clear();
+                    self.compute_pose(state);
                 }
             }
             CameraPoseMessage::MoveControlPoint { cursor } => {
                 self.axis_data.borrow_mut().control_point = cursor;
                 self.cache.clear();
+                self.compute_pose(state);
             }
         }
     }
@@ -138,43 +147,21 @@ where
         let cursor = cursor - bounds.position();
         let scale_cursor = scale_point(cursor, bounds.size());
         match event {
-            Event::Keyboard(iced::keyboard::Event::ModifiersChanged(modifiers)) => {
-                state.is_y = modifiers.control();
-                state.is_alt = modifiers.alt();
-                (Status::Ignored, None)
-            }
-
             Event::Mouse(mouse::Event::WheelScrolled {
                 delta: ScrollDelta::Lines { x: _x, y },
             }) => {
-                if let Some(component_to_edit) = &state.edit {
-                    let delta = y / 10000.0;
-                    match component_to_edit {
-                        Component::A => {
-                            if state.is_y {
-                                self.axis_data.borrow_mut().axis_lines[state.highlight.unwrap()]
-                                    .0
-                                    .y += delta;
-                            } else {
-                                self.axis_data.borrow_mut().axis_lines[state.highlight.unwrap()]
-                                    .0
-                                    .x += delta;
-                            }
-                        }
-                        Component::B => {
-                            if state.is_y {
-                                self.axis_data.borrow_mut().axis_lines[state.highlight.unwrap()]
-                                    .1
-                                    .y += delta;
-                            } else {
-                                self.axis_data.borrow_mut().axis_lines[state.highlight.unwrap()]
-                                    .1
-                                    .x += delta;
-                            }
-                        }
-                    };
-                    self.cache.clear();
-                    (Status::Captured, None)
+                if let Some(_component_to_edit) = &state.edit {
+                    let delta = y / 100.0;
+                    state.captured_delta += delta;
+                    (
+                        Status::Captured,
+                        Some(CameraPoseMessage::EditEndpoint {
+                            cursor: scale_cursor
+                                + (state.captured.unwrap()
+                                    - Vector::new(scale_cursor.x, scale_cursor.y))
+                                    * state.captured_delta,
+                        }),
+                    )
                 } else {
                     (Status::Ignored, None)
                 }
@@ -188,6 +175,7 @@ where
                     }
                     Edit::None => {
                         if state.edit.is_some() {
+                            state.captured = None;
                             (
                                 Status::Ignored,
                                 Some(CameraPoseMessage::Editline { component: None }),
@@ -196,6 +184,9 @@ where
                             let (p1, p2) = self.axis_data.borrow_mut().axis_lines[line_index];
                             let clicked_position = scale_cursor;
                             if should_edit_point(clicked_position, p1) {
+                                state.captured =
+                                    Some(Vector::new(clicked_position.x, clicked_position.y));
+                                state.captured_delta = 0.0;
                                 (
                                     Status::Ignored,
                                     Some(CameraPoseMessage::Editline {
@@ -203,6 +194,9 @@ where
                                     }),
                                 )
                             } else if should_edit_point(clicked_position, p2) {
+                                state.captured =
+                                    Some(Vector::new(clicked_position.x, clicked_position.y));
+                                state.captured_delta = 0.0;
                                 (
                                     Status::Ignored,
                                     Some(CameraPoseMessage::Editline {
@@ -210,6 +204,8 @@ where
                                     }),
                                 )
                             } else {
+                                state.captured = None;
+                                state.captured_delta = 0.0;
                                 (
                                     Status::Captured,
                                     Some(CameraPoseMessage::HighlightLine { highlight: None }),
@@ -255,27 +251,24 @@ where
                     Some(CameraPoseMessage::HighlightLine { highlight: None }),
                 )
             }
-            Event::Mouse(mouse::Event::CursorMoved { position: _ }) => match &state.edit_state {
-                Edit::ControlPoint => (
-                    Status::Captured,
-                    Some(CameraPoseMessage::MoveControlPoint {
-                        cursor: scale_cursor,
-                    }),
-                ),
-                Edit::None => {
-                    if !state.is_alt {
-                        (
-                            Status::Captured,
-                            Some(CameraPoseMessage::EditEndpoint {
-                                cursor: scale_cursor,
-                            }),
-                        )
-                    } else {
-                        (Status::Ignored, None)
-                    }
+            Event::Mouse(mouse::Event::CursorMoved { position: _ }) => {
+                state.captured_delta = 0.0;
+                match &state.edit_state {
+                    Edit::ControlPoint => (
+                        Status::Captured,
+                        Some(CameraPoseMessage::MoveControlPoint {
+                            cursor: scale_cursor,
+                        }),
+                    ),
+                    Edit::None => (
+                        Status::Captured,
+                        Some(CameraPoseMessage::EditEndpoint {
+                            cursor: scale_cursor,
+                        }),
+                    ),
+                    _ => (Status::Ignored, None),
                 }
-                _ => (Status::Ignored, None),
-            },
+            }
             _ => (Status::Ignored, None),
         }
     }
@@ -286,8 +279,64 @@ where
         renderer: &Renderer,
         _theme: &Theme,
         bounds: Rectangle,
-        _cursor: mouse::Cursor,
+        cursor: mouse::Cursor,
     ) -> Vec<Renderer::Geometry> {
+        let draw_cache = self.draw_cache.draw(renderer, bounds.size(), |frame| {
+            *state.points.borrow_mut() = self
+                .draw_lines
+                .borrow()
+                .iter()
+                .flat_map(|item| calculate_location_position_to_2d(&state.compute_solution, item))
+                .map(|item| to_canvas(bounds.size(), &item))
+                .map(|item| Point::new(item.x, item.y))
+                .collect();
+
+            let mut builder = canvas::path::Builder::new();
+            state
+                .points
+                .borrow()
+                .windows(2)
+                .enumerate()
+                .for_each(|(index, items)| {
+                    let start = items[0];
+                    let end = items[1];
+                    builder.move_to(start);
+                    builder.line_to(end);
+                    let location3d_a = *self.draw_lines.borrow().get(index).unwrap();
+                    let location3d_b = *self.draw_lines.borrow().get(index + 1).unwrap();
+                    let distance = (location3d_b - location3d_a).norm();
+
+                    frame.fill_rectangle(
+                        Point::new(end.x + 2.0, end.y + 2.0),
+                        Size::new(150.0, 15.0),
+                        Fill {
+                            style: canvas::Style::Solid(Color::from_rgba(0.3, 0.3, 0.3, 0.8)),
+                            ..Fill::default()
+                        },
+                    );
+                    frame.fill_text(Text {
+                        content: format!(
+                            "{:>7.3},{:>7.3},{:>7.3} ({:.3})",
+                            location3d_b.x, location3d_b.y, location3d_b.z, distance
+                        ),
+                        position: Point::new(end.x + 4.0, end.y + 4.0),
+                        color: Color::from_rgba(0.8, 0.8, 0.8, 0.8),
+                        size: Pixels(10.0),
+                        ..Default::default()
+                    });
+                });
+
+            let path = builder.build();
+            frame.stroke(
+                &path,
+                Stroke {
+                    style: canvas::Style::Solid(Color::from_rgba(0.8, 0.8, 0.8, 0.8)),
+                    width: 2.0,
+                    ..Stroke::default()
+                },
+            );
+        });
+
         let color_red = Color::from_rgba(0.8, 0.2, 0.2, 0.8);
         let color_green = Color::from_rgba(0.2, 0.8, 0.2, 0.8);
         let color_blue = Color::from_rgba(0.2, 0.2, 0.8, 0.8);
@@ -344,6 +393,21 @@ where
                 let p2 = scale_point_to_canvas(&Point::new(p2.x, p2.y), bounds.size());
                 builder.move_to(p1);
                 builder.line_to(p2);
+                let path = builder.build();
+                frame.stroke(
+                    &path,
+                    Stroke {
+                        style: canvas::Style::Solid(color_red),
+                        width: 2.0,
+                        line_dash: LineDash {
+                            segments: &[8.0, 6.0],
+                            offset: 0,
+                        },
+                        ..Stroke::default()
+                    },
+                );
+
+                builder = canvas::path::Builder::new();
                 let (p1, p2) = axis_lines[1];
                 let p1 = scale_point_to_canvas(&Point::new(p1.x, p1.y), bounds.size());
                 let p2 = scale_point_to_canvas(&Point::new(p2.x, p2.y), bounds.size());
@@ -430,6 +494,45 @@ where
                 bounds,
                 frame,
             );
+
+            if let Some(point) = state.captured {
+                builder = canvas::path::Builder::new();
+                builder.circle(
+                    scale_point_to_canvas(&Point::new(point.x, point.y), bounds.size()),
+                    5.0,
+                );
+
+                let path = builder.build();
+                frame.stroke(
+                    &path,
+                    Stroke {
+                        style: canvas::Style::Solid(Color::BLACK),
+                        width: 1.0,
+                        ..Stroke::default()
+                    },
+                );
+                builder = canvas::path::Builder::new();
+                builder.move_to(scale_point_to_canvas(
+                    &Point::new(point.x, point.y),
+                    bounds.size(),
+                ));
+
+                let current_cursor = cursor.position().unwrap() - bounds.position();
+                builder.line_to(Point::new(current_cursor.x, current_cursor.y));
+                let path = builder.build();
+                frame.stroke(
+                    &path,
+                    Stroke {
+                        style: canvas::Style::Solid(Color::from_rgba(0.2, 0.2, 0.2, 0.2)),
+                        width: 1.0,
+                        line_dash: LineDash {
+                            segments: &[15.0, 7.0],
+                            ..LineDash::default()
+                        },
+                        ..Stroke::default()
+                    },
+                );
+            }
         });
 
         let axis_cache = self.axis_cache.draw(renderer, bounds.size(), |frame| {
@@ -482,7 +585,37 @@ where
             }
         });
 
-        vec![draw, axis_cache]
+        vec![draw, axis_cache, draw_cache]
+    }
+
+    fn compute_pose(&self, state: &mut State) {
+        self.draw_cache.clear();
+        let lines_x = [
+            self.axis_data.borrow().axis_lines[0],
+            self.axis_data.borrow().axis_lines[1],
+        ];
+        let lines_y = [
+            self.axis_data.borrow().axis_lines[2],
+            self.axis_data.borrow().axis_lines[3],
+        ];
+        let lines_z = [
+            self.axis_data.borrow().axis_lines[4],
+            self.axis_data.borrow().axis_lines[5],
+        ];
+        let control_point = &self.axis_data.borrow().control_point;
+        state.compute_solution = Some(
+            compute_ui_adapter(
+                lines_x,
+                lines_y,
+                lines_z,
+                self.image_size,
+                control_point,
+                self.axis_data.borrow().flip,
+                &self.axis_data.borrow().custom_origin_translation,
+                &self.axis_data.borrow().custom_scale,
+            )
+            .unwrap(),
+        );
     }
 }
 
@@ -585,15 +718,14 @@ where
 
 #[derive(Default, Clone)]
 pub struct State {
-    pub first_point: Point,
-    pub selected: usize,
     pub highlight: Option<usize>,
     pub edit: Option<Component>,
     pub image_path: String,
-    pub mouse3d_position: Vector3<f32>,
     pub edit_state: Edit,
-    pub is_y: bool,
-    pub is_alt: bool,
+    pub points: RefCell<Vec<Point>>,
+    pub compute_solution: Option<ComputeSolution<f32>>,
+    pub captured: Option<Vector>,
+    pub captured_delta: f32,
 }
 
 impl<'a, Message, Theme, Renderer> From<ComputeCameraPose<'a, Message, Theme, Renderer>>

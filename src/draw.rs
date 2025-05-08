@@ -14,7 +14,7 @@ use iced::{
     },
     event::Status,
     keyboard::{self, Key},
-    widget::canvas::{self, Event, Stroke, Text},
+    widget::canvas::{self, Event, Fill, Stroke, Text},
 };
 use nalgebra::{Vector2, Vector3};
 
@@ -325,6 +325,15 @@ where
                         let location3d_a = *self.draw_lines.borrow().get(index).unwrap();
                         let location3d_b = *self.draw_lines.borrow().get(index + 1).unwrap();
                         let distance = (location3d_b - location3d_a).norm();
+
+                        frame.fill_rectangle(
+                            Point::new(end.x + 2.0, end.y + 2.0),
+                            Size::new(150.0, 15.0),
+                            Fill {
+                                style: canvas::Style::Solid(Color::from_rgba(0.3, 0.3, 0.3, 0.8)),
+                                ..Fill::default()
+                            },
+                        );
                         frame.fill_text(Text {
                             content: format!(
                                 "{:>7.3},{:>7.3},{:>7.3} ({:.3})",
@@ -480,6 +489,8 @@ where
                 &calculate_location_position_to_2d(self.compute_solution, &new_point_3d).unwrap(),
             );
 
+            self.draw_current_location_helpers(bounds, frame, new_point_3d, new_point);
+
             let mut builder = canvas::path::Builder::new();
             frame.fill_text(Text {
                 content: format!(
@@ -505,6 +516,110 @@ where
             );
         });
         vec![draw_lines_cache, draw_cache]
+    }
+
+    fn draw_current_location_helpers(
+        &self,
+        bounds: Rectangle,
+        frame: &mut geometry::Frame<Renderer>,
+        new_point_3d: Vector3<f32>,
+        new_point: Vector2<f32>,
+    ) {
+        let mut builder = canvas::path::Builder::new();
+
+        //x
+        let new_point_helper_positive = to_canvas(
+            bounds.size(),
+            &calculate_location_position_to_2d(
+                self.compute_solution,
+                &(new_point_3d + Vector3::new(3.0, 0.0, 0.0)),
+            )
+            .unwrap(),
+        );
+
+        builder.move_to(Point::new(new_point.x, new_point.y));
+        builder.line_to(Point::new(
+            new_point_helper_positive.x,
+            new_point_helper_positive.y,
+        ));
+        let new_point_helper_negative = to_canvas(
+            bounds.size(),
+            &calculate_location_position_to_2d(
+                self.compute_solution,
+                &(new_point_3d + Vector3::new(-3.0, 0.0, 0.0)),
+            )
+            .unwrap(),
+        );
+        builder.move_to(Point::new(new_point.x, new_point.y));
+        builder.line_to(Point::new(
+            new_point_helper_negative.x,
+            new_point_helper_negative.y,
+        ));
+        //y
+        let new_point_helper_positive = to_canvas(
+            bounds.size(),
+            &calculate_location_position_to_2d(
+                self.compute_solution,
+                &(new_point_3d + Vector3::new(0.0, 3.0, 0.0)),
+            )
+            .unwrap(),
+        );
+
+        builder.move_to(Point::new(new_point.x, new_point.y));
+        builder.line_to(Point::new(
+            new_point_helper_positive.x,
+            new_point_helper_positive.y,
+        ));
+        let new_point_helper_negative = to_canvas(
+            bounds.size(),
+            &calculate_location_position_to_2d(
+                self.compute_solution,
+                &(new_point_3d + Vector3::new(0.0, -3.0, 0.0)),
+            )
+            .unwrap(),
+        );
+        builder.move_to(Point::new(new_point.x, new_point.y));
+        builder.line_to(Point::new(
+            new_point_helper_negative.x,
+            new_point_helper_negative.y,
+        ));
+        //z
+        let new_point_helper_positive = to_canvas(
+            bounds.size(),
+            &calculate_location_position_to_2d(
+                self.compute_solution,
+                &(new_point_3d + Vector3::new(0.0, 0.0, 3.0)),
+            )
+            .unwrap(),
+        );
+
+        builder.move_to(Point::new(new_point.x, new_point.y));
+        builder.line_to(Point::new(
+            new_point_helper_positive.x,
+            new_point_helper_positive.y,
+        ));
+        let new_point_helper_negative = to_canvas(
+            bounds.size(),
+            &calculate_location_position_to_2d(
+                self.compute_solution,
+                &(new_point_3d + Vector3::new(0.0, 0.0, -3.0)),
+            )
+            .unwrap(),
+        );
+        builder.move_to(Point::new(new_point.x, new_point.y));
+        builder.line_to(Point::new(
+            new_point_helper_negative.x,
+            new_point_helper_negative.y,
+        ));
+        let path = builder.build();
+        frame.stroke(
+            &path,
+            Stroke {
+                style: canvas::Style::Solid(Color::WHITE),
+                width: 0.5,
+                ..Stroke::default()
+            },
+        );
     }
 
     fn extract_last_point_details_for_mode<'b>(

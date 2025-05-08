@@ -478,11 +478,15 @@ impl Perspective {
             return center(text("Loading...").width(Fill).align_x(Center).size(50)).into();
         };
         let component: Element<Message> = match self.mode {
-            UiMod::Pose => ComputeCameraPose::new(Rc::clone(axis_data), &self.compute_solution)
-                .image_size(self.image_size)
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .into(),
+            UiMod::Pose => ComputeCameraPose::new(
+                Rc::clone(axis_data),
+                Rc::clone(&self.draw_lines),
+                &self.compute_solution,
+            )
+            .image_size(self.image_size)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into(),
             UiMod::Scale => DrawLine::new(
                 &self.compute_solution,
                 Rc::clone(&self.draw_lines),
