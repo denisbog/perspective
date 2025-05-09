@@ -11,9 +11,10 @@ use iced::widget::{
 use iced::{Element, Length, Point, Size, Task, Theme};
 use nalgebra::{Vector2, Vector3};
 use perspective::camera_pose::ComputeCameraPose;
+use perspective::compute::data::ComputeSolution;
 use perspective::compute::{
-    ComputeSolution, Lines, StoreLine, StorePoint, StorePoint3d, compute_camera_pose_scale,
-    compute_ui_adapter, read_points_from_file, store_scene_data_to_file,
+    Lines, StoreLine, StorePoint, StorePoint3d, compute_camera_pose_scale, compute_ui_adapter,
+    read_points_from_file, store_scene_data_to_file,
 };
 use perspective::draw::DrawLine;
 use perspective::optimize::{ortho_center_optimize, ortho_center_optimize_x, pose_optimize};

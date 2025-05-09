@@ -15,19 +15,20 @@ use iced::{
         },
     },
     event::Status,
+    keyboard::{self, Key},
     mouse::ScrollDelta,
     widget::canvas::{self, Event, Fill, LineDash, Stroke, Text},
 };
 use nalgebra::{Matrix3, Perspective3, Point2, Vector2, Vector3};
 
 use crate::{
-    AxisData, Component, Edit,
-    compute::{ComputeSolution, compute_ui_adapter},
+    AxisData, Component, Edit, EditAxis,
+    compute::{compute_ui_adapter, data::ComputeSolution},
     draw_decoration::{draw_grid_for_origin, draw_origin_with_axis, draw_vanishing_points},
     utils::{
-        calculate_location_position_to_2d, check_if_control_point_is_clicked,
-        check_if_point_is_from_line, get_extension_for_line_within_bounds, scale_point,
-        scale_point_to_canvas, should_edit_point, to_canvas,
+        check_if_control_point_is_clicked, check_if_point_is_from_line,
+        get_extension_for_line_within_bounds, scale_point, scale_point_to_canvas,
+        should_edit_point, to_canvas,
     },
 };
 
@@ -147,29 +148,92 @@ where
         let cursor = cursor - bounds.position();
         let scale_cursor = scale_point(cursor, bounds.size());
         match event {
-            Event::Mouse(mouse::Event::WheelScrolled {
-                delta: ScrollDelta::Lines { x: _x, y },
-            }) => {
-                if let Some(_component_to_edit) = &state.edit {
-                    let delta = y / 100.0;
-                    state.captured_delta += delta;
-                    (
-                        Status::Captured,
-                        Some(CameraPoseMessage::EditEndpoint {
-                            cursor: scale_cursor
-                                + (state.captured.unwrap()
-                                    - Vector::new(scale_cursor.x, scale_cursor.y))
-                                    * state.captured_delta,
-                        }),
-                    )
+            Event::Keyboard(keyboard::Event::KeyPressed { key, .. }) => {
+                if let Key::Character(c) = key {
+                    let c = c.as_str();
+                    match c {
+                        "r" => match state.edit_state {
+                            Edit::ControlPoint(_) => {
+                                state.captured_delta = 0.0;
+                                self.cache.clear();
+                                state.edit_state = Edit::ControlPoint(EditAxis::EditX);
+                                (Status::Captured, None)
+                            }
+                            Edit::VanishingPoint(_) => {
+                                state.captured_delta = 0.0;
+                                self.cache.clear();
+                                state.edit_state = Edit::VanishingPoint(EditAxis::EditX);
+                                (Status::Captured, None)
+                            }
+                            _ => (Status::Captured, None),
+                        },
+                        "s" => match state.edit_state {
+                            Edit::ControlPoint(_) => {
+                                state.captured_delta = 0.0;
+                                self.cache.clear();
+                                state.edit_state = Edit::ControlPoint(EditAxis::EditY);
+                                (Status::Captured, None)
+                            }
+                            Edit::VanishingPoint(_) => {
+                                state.captured_delta = 0.0;
+                                self.cache.clear();
+                                state.edit_state = Edit::VanishingPoint(EditAxis::EditY);
+                                (Status::Captured, None)
+                            }
+                            _ => (Status::Captured, None),
+                        },
+                        _ => (Status::Ignored, None),
+                    }
                 } else {
                     (Status::Ignored, None)
                 }
             }
-            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
+            Event::Mouse(mouse::Event::WheelScrolled {
+                delta: ScrollDelta::Lines { x: _x, y },
+            }) => {
+                let delta = y / 100.0;
+                state.captured_delta += delta;
+                let vector_for_delta = match &state.edit_state {
+                    Edit::ControlPoint(EditAxis::EditX) | Edit::VanishingPoint(EditAxis::EditX) => {
+                        state.captured.unwrap()
+                            - Vector::new(scale_cursor.x, state.captured.unwrap().y)
+                    }
+                    Edit::ControlPoint(EditAxis::EditY) | Edit::VanishingPoint(EditAxis::EditY) => {
+                        state.captured.unwrap()
+                            - Vector::new(state.captured.unwrap().x, scale_cursor.y)
+                    }
+                    _ => state.captured.unwrap() - Vector::new(scale_cursor.x, scale_cursor.y),
+                };
                 match &state.edit_state {
-                    Edit::ControlPoint => {
+                    Edit::ControlPoint(_) => (
+                        Status::Captured,
+                        Some(CameraPoseMessage::MoveControlPoint {
+                            cursor: scale_cursor + vector_for_delta * state.captured_delta,
+                        }),
+                    ),
+                    Edit::VanishingPoint(_) => (
+                        Status::Captured,
+                        Some(CameraPoseMessage::EditEndpoint {
+                            cursor: scale_cursor + vector_for_delta * state.captured_delta,
+                        }),
+                    ),
+                    _ => (Status::Ignored, None),
+                }
+            }
+            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
+                let clicked_position = scale_cursor;
+                state.captured = Some(Vector::new(clicked_position.x, clicked_position.y));
+                match &state.edit_state {
+                    Edit::ControlPoint(_) => {
                         state.edit_state = Edit::None;
+                        self.cache.clear();
+                        (Status::Ignored, None)
+                    }
+                    Edit::VanishingPoint(_) => {
+                        state.edit_state = Edit::None;
+                        state.edit = None;
+                        state.captured = None;
+                        state.highlight = None;
                         self.cache.clear();
                         (Status::Ignored, None)
                     }
@@ -182,10 +246,11 @@ where
                             )
                         } else if let Some(line_index) = state.highlight {
                             let (p1, p2) = self.axis_data.borrow_mut().axis_lines[line_index];
-                            let clicked_position = scale_cursor;
                             if should_edit_point(clicked_position, p1) {
                                 state.captured =
                                     Some(Vector::new(clicked_position.x, clicked_position.y));
+
+                                state.edit_state = Edit::VanishingPoint(EditAxis::None);
                                 state.captured_delta = 0.0;
                                 (
                                     Status::Ignored,
@@ -196,6 +261,7 @@ where
                             } else if should_edit_point(clicked_position, p2) {
                                 state.captured =
                                     Some(Vector::new(clicked_position.x, clicked_position.y));
+                                state.edit_state = Edit::VanishingPoint(EditAxis::None);
                                 state.captured_delta = 0.0;
                                 (
                                     Status::Ignored,
@@ -205,6 +271,7 @@ where
                                 )
                             } else {
                                 state.captured = None;
+                                state.edit_state = Edit::None;
                                 state.captured_delta = 0.0;
                                 (
                                     Status::Captured,
@@ -224,7 +291,8 @@ where
                     self.axis_data.borrow().control_point,
                     scale_cursor,
                 ) {
-                    state.edit_state = Edit::ControlPoint;
+                    state.captured = Some(Vector::new(scale_cursor.x, scale_cursor.y));
+                    state.edit_state = Edit::ControlPoint(EditAxis::None);
                     self.cache.clear();
                     return (Status::Captured, None);
                 } else {
@@ -254,9 +322,15 @@ where
             Event::Mouse(mouse::Event::CursorMoved { position: _ }) => {
                 state.captured_delta = 0.0;
                 match &state.edit_state {
-                    Edit::ControlPoint => (
+                    Edit::ControlPoint(_) => (
                         Status::Captured,
                         Some(CameraPoseMessage::MoveControlPoint {
+                            cursor: scale_cursor,
+                        }),
+                    ),
+                    Edit::VanishingPoint(_) => (
+                        Status::Captured,
+                        Some(CameraPoseMessage::EditEndpoint {
                             cursor: scale_cursor,
                         }),
                     ),
@@ -286,7 +360,12 @@ where
                 .draw_lines
                 .borrow()
                 .iter()
-                .flat_map(|item| calculate_location_position_to_2d(&state.compute_solution, item))
+                .flat_map(|item| {
+                    state
+                        .compute_solution
+                        .as_ref()?
+                        .calculate_location_position_to_2d(item)
+                })
                 .map(|item| to_canvas(bounds.size(), &item))
                 .map(|item| Point::new(item.x, item.y))
                 .collect();
@@ -495,43 +574,48 @@ where
                 frame,
             );
 
-            if let Some(point) = state.captured {
-                builder = canvas::path::Builder::new();
-                builder.circle(
-                    scale_point_to_canvas(&Point::new(point.x, point.y), bounds.size()),
-                    5.0,
-                );
+            match state.edit_state {
+                Edit::ControlPoint(_) | Edit::VanishingPoint(_) => {
+                    if let Some(point) = state.captured {
+                        builder = canvas::path::Builder::new();
+                        builder.circle(
+                            scale_point_to_canvas(&Point::new(point.x, point.y), bounds.size()),
+                            5.0,
+                        );
 
-                let path = builder.build();
-                frame.stroke(
-                    &path,
-                    Stroke {
-                        style: canvas::Style::Solid(Color::BLACK),
-                        width: 1.0,
-                        ..Stroke::default()
-                    },
-                );
-                builder = canvas::path::Builder::new();
-                builder.move_to(scale_point_to_canvas(
-                    &Point::new(point.x, point.y),
-                    bounds.size(),
-                ));
+                        let path = builder.build();
+                        frame.stroke(
+                            &path,
+                            Stroke {
+                                style: canvas::Style::Solid(Color::BLACK),
+                                width: 1.0,
+                                ..Stroke::default()
+                            },
+                        );
+                        builder = canvas::path::Builder::new();
+                        builder.move_to(scale_point_to_canvas(
+                            &Point::new(point.x, point.y),
+                            bounds.size(),
+                        ));
 
-                let current_cursor = cursor.position().unwrap() - bounds.position();
-                builder.line_to(Point::new(current_cursor.x, current_cursor.y));
-                let path = builder.build();
-                frame.stroke(
-                    &path,
-                    Stroke {
-                        style: canvas::Style::Solid(Color::from_rgba(0.2, 0.2, 0.2, 0.2)),
-                        width: 1.0,
-                        line_dash: LineDash {
-                            segments: &[15.0, 7.0],
-                            ..LineDash::default()
-                        },
-                        ..Stroke::default()
-                    },
-                );
+                        let current_cursor = cursor.position().unwrap() - bounds.position();
+                        builder.line_to(Point::new(current_cursor.x, current_cursor.y));
+                        let path = builder.build();
+                        frame.stroke(
+                            &path,
+                            Stroke {
+                                style: canvas::Style::Solid(Color::from_rgba(0.2, 0.2, 0.2, 0.2)),
+                                width: 1.0,
+                                line_dash: LineDash {
+                                    segments: &[15.0, 7.0],
+                                    ..LineDash::default()
+                                },
+                                ..Stroke::default()
+                            },
+                        );
+                    }
+                }
+                _ => (),
             }
         });
 
@@ -544,13 +628,13 @@ where
                 .append_translation(&Vector2::new(bounds.width / 2.0, bounds.height / 2.0));
 
                 let perspective =
-                    Perspective3::new(1.0, compute_solution.field_of_view, 0.01, 10.0);
+                    Perspective3::new(1.0, compute_solution.field_of_view(), 0.01, 10.0);
 
                 let mut matrix = perspective.into_inner();
-                *matrix.index_mut((0, 2)) = -compute_solution.ortho_center.x;
-                *matrix.index_mut((1, 2)) = -compute_solution.ortho_center.y;
+                *matrix.index_mut((0, 2)) = -compute_solution.ortho_center().x;
+                *matrix.index_mut((1, 2)) = -compute_solution.ortho_center().y;
 
-                let transform = matrix * compute_solution.view_transform;
+                let transform = matrix * compute_solution.view_transform();
                 draw_grid_for_origin(frame, color_red, transform, dc_to_image);
                 draw_origin_with_axis(
                     frame,
@@ -561,8 +645,8 @@ where
                     dc_to_image,
                 );
                 let yellow = Color::from_rgba(0.8, 0.8, 0.2, 0.8);
-                let ortho_center =
-                    dc_to_image * Point2::from(compute_solution.ortho_center.xy()).to_homogeneous();
+                let ortho_center = dc_to_image
+                    * Point2::from(compute_solution.ortho_center().xy()).to_homogeneous();
 
                 let mut builder = canvas::path::Builder::new();
                 let point = Point::new(ortho_center.x, ortho_center.y);

@@ -9,7 +9,7 @@ use crate::{
         compute_camera_pose, compute_camera_pose_scale, compute_camera_pose_translation,
         find_vanishing_point_for_lines, triangle_ortho_center,
     },
-    utils::{calculate_location_position_to_2d, relative_to_image_plane},
+    utils::relative_to_image_plane,
 };
 
 pub fn ortho_center_optimize(ratio: f32, points: Vec<Vector2<f32>>) -> Result<Vec<Vector2<f32>>> {
@@ -285,11 +285,9 @@ pub fn pose_optimize(
                 if let Some(custom_error) = &custom_error {
                     let custom_error_image_point =
                         relative_to_image_plane(ratio, &custom_error.point);
-                    let projected = calculate_location_position_to_2d(
-                        &Some(compute_solution),
-                        &custom_error.source_vector,
-                    )
-                    .unwrap();
+                    let projected = &compute_solution
+                        .calculate_location_position_to_2d(&custom_error.source_vector)
+                        .unwrap();
                     (projected - custom_error_image_point).norm()
                 } else {
                     0.0

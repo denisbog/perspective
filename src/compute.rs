@@ -5,9 +5,10 @@ use std::{
 };
 
 use anyhow::Result;
+use data::ComputeSolution;
 use iced::{Point, Size};
 use nalgebra::{
-    ComplexField, Matrix3, Matrix4, RowVector3, Scalar, SimdComplexField, Vector2, Vector3,
+    ComplexField, Matrix3, RealField, RowVector3, Scalar, SimdComplexField, Vector2, Vector3,
 };
 use num_traits::Float;
 use serde::{Deserialize, Serialize};
@@ -53,6 +54,100 @@ impl From<&(Point, Point)> for StoreLine {
     }
 }
 
+pub mod data {
+    use nalgebra::{Matrix4, Perspective3, Point3, RealField, Vector2, Vector3};
+    use num_traits::Float;
+
+    #[derive(Clone)]
+    pub struct ComputeSolution<T> {
+        view_transform: Matrix4<T>,
+        ortho_center: Vector2<T>,
+        focal_length: T,
+        field_of_view: T,
+        transform: Matrix4<T>,
+    }
+
+    impl<T: Float + RealField> ComputeSolution<T> {
+        pub fn new(view_transform: Matrix4<T>, ortho_center: Vector2<T>, focal_length: T) -> Self {
+            let field_of_view =
+                T::from(2.0).unwrap() * Float::atan(T::from(1.0).unwrap() / focal_length);
+
+            let perspective = Perspective3::new(
+                T::from(1.0).unwrap(),
+                field_of_view,
+                T::from(0.01).unwrap(),
+                T::from(10.0).unwrap(),
+            );
+
+            let mut matrix = perspective.into_inner();
+            *matrix.index_mut((0, 2)) = -ortho_center.x;
+            *matrix.index_mut((1, 2)) = -ortho_center.y;
+
+            let transform = matrix * view_transform;
+
+            Self {
+                view_transform,
+                ortho_center,
+                focal_length,
+                field_of_view,
+                transform,
+            }
+        }
+
+        pub fn calculate_location_position_to_2d(
+            &self,
+            location3d: &Vector3<T>,
+        ) -> Option<Vector2<T>> {
+            let point = Point3::from(*location3d);
+            let point = self.transform * point.to_homogeneous();
+            let point = Point3::from_homogeneous(point)?;
+            Some(point.xy().coords)
+        }
+
+        pub fn view_transform(&self) -> Matrix4<T> {
+            self.view_transform
+        }
+        pub fn ortho_center(&self) -> Vector2<T> {
+            self.ortho_center
+        }
+        pub fn focal_length(&self) -> T {
+            self.focal_length
+        }
+        pub fn field_of_view(&self) -> T {
+            self.field_of_view
+        }
+        pub fn scale(&mut self, scale: T) {
+            self.view_transform *= Matrix4::new_scaling(scale);
+
+            let perspective = Perspective3::new(
+                T::from(1.0).unwrap(),
+                self.field_of_view,
+                T::from(0.01).unwrap(),
+                T::from(10.0).unwrap(),
+            );
+
+            let mut matrix = perspective.into_inner();
+            *matrix.index_mut((0, 2)) = -self.ortho_center.x;
+            *matrix.index_mut((1, 2)) = -self.ortho_center.y;
+            self.transform = matrix * self.view_transform;
+        }
+        pub fn translate(&mut self, translate_origin: Vector3<T>) {
+            self.view_transform *= Matrix4::new_translation(&translate_origin);
+
+            let perspective = Perspective3::new(
+                T::from(1.0).unwrap(),
+                self.field_of_view,
+                T::from(0.01).unwrap(),
+                T::from(10.0).unwrap(),
+            );
+
+            let mut matrix = perspective.into_inner();
+            *matrix.index_mut((0, 2)) = -self.ortho_center.x;
+            *matrix.index_mut((1, 2)) = -self.ortho_center.y;
+            self.transform = matrix * self.view_transform;
+        }
+    }
+}
 pub fn read_points_from_file(points: &String) -> Result<(AxisData, Option<Vec<Vector3<f32>>>)> {
     let mut file = File::open(points)?;
     let mut content = String::new();
@@ -110,7 +205,9 @@ pub fn read_points_from_file(points: &String) -> Result<(AxisData, Option<Vec<Ve
     ))
 }
 
-pub fn adaptor_compute_solution_to_scene_settings<T: Float + ComplexField + Into<f32>>(
+pub fn adaptor_compute_solution_to_scene_settings<
+    T: Float + ComplexField + Into<f32> + RealField,
+>(
     image_width: u32,
     image_height: u32,
     compute_solution: &ComputeSolution<T>,
@@ -118,7 +215,7 @@ pub fn adaptor_compute_solution_to_scene_settings<T: Float + ComplexField + Into
     compute_solution_to_scene_settings(image_width, image_height, compute_solution)
 }
 
-pub async fn store_scene_data_to_file<T: Float + ComplexField + Into<f32>>(
+pub async fn store_scene_data_to_file<T: Float + ComplexField + Into<f32> + RealField>(
     compute_solution: &ComputeSolution<T>,
     image_width: u32,
     image_height: u32,
@@ -145,7 +242,7 @@ pub async fn store_scene_data_to_file<T: Float + ComplexField + Into<f32>>(
     Ok(data)
 }
 pub fn compute_ui_adapter<
-    T: Float + SubAssign + MulAssign + DivAssign + AddAssign + ComplexField + Scalar,
+    T: Float + SubAssign + MulAssign + DivAssign + AddAssign + ComplexField + Scalar + RealField,
 >(
     x_lines: [(Point<T>, Point<T>); 2],
     y_lines: [(Point<T>, Point<T>); 2],
@@ -228,20 +325,21 @@ pub fn compute_ui_adapter<
     }
 }
 
-pub fn compute_camera_pose_scale<T: Float + MulAssign + AddAssign + Scalar>(
+pub fn compute_camera_pose_scale<T: Float + MulAssign + AddAssign + Scalar + RealField>(
     mut compute_solution: ComputeSolution<T>,
     scale: T,
 ) -> Result<ComputeSolution<T>> {
-    compute_solution.view_transform *= Matrix4::new_scaling(scale);
+    compute_solution.scale(scale);
     Ok(compute_solution)
 }
 
-pub fn compute_camera_pose_translation<T: Float + AddAssign + SubAssign + MulAssign + Scalar>(
+pub fn compute_camera_pose_translation<
+    T: Float + AddAssign + SubAssign + MulAssign + Scalar + RealField,
+>(
     mut compute_solution: ComputeSolution<T>,
     translate_origin: &Vector3<T>,
 ) -> Result<ComputeSolution<T>> {
-    compute_solution.view_transform *=
-        Matrix4::new_translation(&(Vector3::zeros() - translate_origin));
+    compute_solution.translate(Vector3::zeros() - translate_origin);
     Ok(compute_solution)
 }
 pub fn compute_camera_pose<
@@ -253,6 +351,7 @@ pub fn compute_camera_pose<
         + DivAssign
         + MulAssign
         + Scalar
+        + RealField
         + 'static,
 >(
     vanishing_points: &[Vector2<T>],
@@ -292,10 +391,9 @@ pub fn compute_camera_pose<
     //trace!("optimized focal length: {:?}", solution);
     //let focal_length = solution.position()[0];
 
-    let focal_length = (ortho_center - vanishing_points[1])
-        .dot(&(ortho_center - vanishing_points[2]))
-        .abs()
-        .sqrt();
+    let focal_length = Float::sqrt(Float::abs(
+        (ortho_center - vanishing_points[1]).dot(&(ortho_center - vanishing_points[2])),
+    ));
 
     let x_rotation = vanishing_points[0] - ortho_center;
     let x_rotation = Vector3::new(x_rotation.x, x_rotation.y, -focal_length).normalize();
@@ -377,23 +475,4 @@ pub fn triangle_ortho_center<T: Float + Scalar + 'static>(
         + e * f * (d - b))
         / n;
     Vector2::new(x, y)
-}
-
-#[derive(Clone)]
-pub struct ComputeSolution<T> {
-    pub view_transform: Matrix4<T>,
-    pub ortho_center: Vector2<T>,
-    pub focal_length: T,
-    pub field_of_view: T,
-}
-
-impl<T: Float> ComputeSolution<T> {
-    pub fn new(view_transform: Matrix4<T>, ortho_center: Vector2<T>, focal_length: T) -> Self {
-        Self {
-            view_transform,
-            ortho_center,
-            focal_length,
-            field_of_view: T::from(2.0).unwrap() * (T::from(1.0).unwrap() / focal_length).atan(),
-        }
-    }
 }

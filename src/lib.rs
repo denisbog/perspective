@@ -64,10 +64,11 @@ pub enum Component {
 #[derive(Default, Clone, Debug)]
 pub enum Edit {
     MarkError(EditAxis),
-    ControlPoint,
+    ControlPoint(EditAxis),
     Draw,
     Extrude(EditAxis),
     Scale(EditAxis),
+    VanishingPoint(EditAxis),
     #[default]
     None,
 }

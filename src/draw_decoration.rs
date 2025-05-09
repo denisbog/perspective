@@ -63,7 +63,7 @@ pub fn draw_vanishing_points<Renderer>(
         bounds.size(),
     ));
     let path = builder.build();
-    let style = if let Edit::ControlPoint = edit {
+    let style = if let Edit::ControlPoint(_) = edit {
         canvas::Style::Solid(Color::from_rgba(8.0, 6.0, 5.0, 0.4))
     } else {
         canvas::Style::Solid(Color::from_rgba(8.0, 6.0, 0.0, 0.4))

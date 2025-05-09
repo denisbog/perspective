@@ -21,11 +21,8 @@ use nalgebra::{Vector2, Vector3};
 
 use crate::{
     Component, Edit, EditAxis, PointInformation,
-    compute::ComputeSolution,
-    utils::{
-        calculate_cursor_position_to_3d, calculate_location_position_to_2d,
-        check_if_point_is_from_line_new, to_canvas,
-    },
+    compute::data::ComputeSolution,
+    utils::{calculate_cursor_position_to_3d, check_if_point_is_from_line_new, to_canvas},
 };
 
 pub struct DrawLine<'a, Message, Theme = iced::Theme, Renderer = iced::Renderer>
@@ -219,7 +216,7 @@ where
                     match c {
                         "x" => {
                             state.edit_state = Edit::Scale(EditAxis::None);
-                            (Status::Ignored, None)
+                            (Status::Captured, None)
                         }
                         "r" => match state.edit_state {
                             Edit::Extrude(_) => {
@@ -310,7 +307,12 @@ where
                     .draw_lines
                     .borrow()
                     .iter()
-                    .flat_map(|item| calculate_location_position_to_2d(self.compute_solution, item))
+                    .flat_map(|item| {
+                        self.compute_solution
+                            .as_ref()
+                            .unwrap()
+                            .calculate_location_position_to_2d(item)
+                    })
                     .map(|item| to_canvas(bounds.size(), &item))
                     .map(|item| Point::new(item.x, item.y))
                     .collect();
@@ -364,11 +366,12 @@ where
         let draw_cache = self.draw_cache.draw(renderer, bounds.size(), |frame| {
             let selected_color = match &state.edit_state {
                 Edit::MarkError(_) => Color::from_rgba(0.8, 0.2, 0.2, 0.8),
-                Edit::ControlPoint => Color::from_rgba(0.8, 0.8, 0.2, 0.8),
+                Edit::ControlPoint(_) => Color::from_rgba(0.8, 0.8, 0.2, 0.8),
                 Edit::Draw => Color::from_rgba(0.8, 0.8, 0.2, 0.8),
                 Edit::Extrude(_) => Color::from_rgba(0.8, 0.8, 0.8, 0.8),
                 Edit::Scale(_) => Color::from_rgba(0.2, 0.8, 0.2, 0.8),
                 Edit::None => Color::from_rgba(0.8, 0.8, 0.2, 0.8),
+                _ => Color::from_rgba(0.8, 0.8, 0.2, 0.8),
             };
 
             if let Some(item) = state.points.borrow().get(state.selected) {
@@ -412,15 +415,20 @@ where
                 if let Some(scale) = self.custom_scale.borrow().as_ref() {
                     let start = to_canvas(
                         bounds.size(),
-                        &calculate_location_position_to_2d(
-                            self.compute_solution,
-                            &scale.source_vector,
-                        )
-                        .unwrap(),
+                        &self
+                            .compute_solution
+                            .as_ref()
+                            .unwrap()
+                            .calculate_location_position_to_2d(&scale.source_vector)
+                            .unwrap(),
                     );
                     let end = to_canvas(
                         bounds.size(),
-                        &calculate_location_position_to_2d(self.compute_solution, &scale.vector)
+                        &self
+                            .compute_solution
+                            .as_ref()
+                            .unwrap()
+                            .calculate_location_position_to_2d(&scale.vector)
                             .unwrap(),
                     );
                     let start = Point::new(start.x, start.y);
@@ -441,19 +449,21 @@ where
                 if let Some(custom_error) = self.custom_error.borrow().as_ref() {
                     let start = to_canvas(
                         bounds.size(),
-                        &calculate_location_position_to_2d(
-                            self.compute_solution,
-                            &custom_error.source_vector,
-                        )
-                        .unwrap(),
+                        &self
+                            .compute_solution
+                            .as_ref()
+                            .unwrap()
+                            .calculate_location_position_to_2d(&custom_error.source_vector)
+                            .unwrap(),
                     );
                     let end = to_canvas(
                         bounds.size(),
-                        &calculate_location_position_to_2d(
-                            self.compute_solution,
-                            &custom_error.vector,
-                        )
-                        .unwrap(),
+                        &self
+                            .compute_solution
+                            .as_ref()
+                            .unwrap()
+                            .calculate_location_position_to_2d(&custom_error.vector)
+                            .unwrap(),
                     );
                     let start = Point::new(start.x, start.y);
                     let end = Point::new(end.x, end.y);
@@ -487,12 +497,22 @@ where
 
             let last_point = to_canvas(
                 bounds.size(),
-                &calculate_location_position_to_2d(self.compute_solution, &last_point_3d).unwrap(),
+                &self
+                    .compute_solution
+                    .as_ref()
+                    .unwrap()
+                    .calculate_location_position_to_2d(&last_point_3d)
+                    .unwrap(),
             );
 
             let new_point = to_canvas(
                 bounds.size(),
-                &calculate_location_position_to_2d(self.compute_solution, &new_point_3d).unwrap(),
+                &self
+                    .compute_solution
+                    .as_ref()
+                    .unwrap()
+                    .calculate_location_position_to_2d(&new_point_3d)
+                    .unwrap(),
             );
 
             self.draw_current_location_helpers(bounds, frame, new_point_3d, new_point);
@@ -536,11 +556,12 @@ where
         //x
         let new_point_helper_positive = to_canvas(
             bounds.size(),
-            &calculate_location_position_to_2d(
-                self.compute_solution,
-                &(new_point_3d + Vector3::new(3.0, 0.0, 0.0)),
-            )
-            .unwrap(),
+            &self
+                .compute_solution
+                .as_ref()
+                .unwrap()
+                .calculate_location_position_to_2d(&(new_point_3d + Vector3::new(3.0, 0.0, 0.0)))
+                .unwrap(),
         );
 
         builder.move_to(Point::new(new_point.x, new_point.y));
@@ -550,11 +571,12 @@ where
         ));
         let new_point_helper_negative = to_canvas(
             bounds.size(),
-            &calculate_location_position_to_2d(
-                self.compute_solution,
-                &(new_point_3d + Vector3::new(-3.0, 0.0, 0.0)),
-            )
-            .unwrap(),
+            &self
+                .compute_solution
+                .as_ref()
+                .unwrap()
+                .calculate_location_position_to_2d(&(new_point_3d + Vector3::new(-3.0, 0.0, 0.0)))
+                .unwrap(),
         );
         builder.move_to(Point::new(new_point.x, new_point.y));
         builder.line_to(Point::new(
@@ -564,11 +586,12 @@ where
         //y
         let new_point_helper_positive = to_canvas(
             bounds.size(),
-            &calculate_location_position_to_2d(
-                self.compute_solution,
-                &(new_point_3d + Vector3::new(0.0, 3.0, 0.0)),
-            )
-            .unwrap(),
+            &self
+                .compute_solution
+                .as_ref()
+                .unwrap()
+                .calculate_location_position_to_2d(&(new_point_3d + Vector3::new(0.0, 3.0, 0.0)))
+                .unwrap(),
         );
 
         builder.move_to(Point::new(new_point.x, new_point.y));
@@ -578,11 +601,12 @@ where
         ));
         let new_point_helper_negative = to_canvas(
             bounds.size(),
-            &calculate_location_position_to_2d(
-                self.compute_solution,
-                &(new_point_3d + Vector3::new(0.0, -3.0, 0.0)),
-            )
-            .unwrap(),
+            &self
+                .compute_solution
+                .as_ref()
+                .unwrap()
+                .calculate_location_position_to_2d(&(new_point_3d + Vector3::new(0.0, -3.0, 0.0)))
+                .unwrap(),
         );
         builder.move_to(Point::new(new_point.x, new_point.y));
         builder.line_to(Point::new(
@@ -592,11 +616,12 @@ where
         //z
         let new_point_helper_positive = to_canvas(
             bounds.size(),
-            &calculate_location_position_to_2d(
-                self.compute_solution,
-                &(new_point_3d + Vector3::new(0.0, 0.0, 3.0)),
-            )
-            .unwrap(),
+            &self
+                .compute_solution
+                .as_ref()
+                .unwrap()
+                .calculate_location_position_to_2d(&(new_point_3d + Vector3::new(0.0, 0.0, 3.0)))
+                .unwrap(),
         );
 
         builder.move_to(Point::new(new_point.x, new_point.y));
@@ -606,11 +631,12 @@ where
         ));
         let new_point_helper_negative = to_canvas(
             bounds.size(),
-            &calculate_location_position_to_2d(
-                self.compute_solution,
-                &(new_point_3d + Vector3::new(0.0, 0.0, -3.0)),
-            )
-            .unwrap(),
+            &self
+                .compute_solution
+                .as_ref()
+                .unwrap()
+                .calculate_location_position_to_2d(&(new_point_3d + Vector3::new(0.0, 0.0, -3.0)))
+                .unwrap(),
         );
         builder.move_to(Point::new(new_point.x, new_point.y));
         builder.line_to(Point::new(

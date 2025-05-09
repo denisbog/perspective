@@ -4,7 +4,7 @@ use iced::{Point, Size, Vector};
 use nalgebra::{Matrix3, Perspective3, Point2, Point3, RealField, Scalar, Vector2, Vector3};
 use num_traits::Float;
 
-use crate::{EditAxis, compute::ComputeSolution};
+use crate::{EditAxis, compute::data::ComputeSolution};
 
 pub fn check_if_control_point_is_clicked(control_point: Point, cursor: Point) -> bool {
     let error = control_point - cursor;
@@ -137,16 +137,16 @@ pub fn calculate_cursor_position_to_3d<
 
     let perspective = Perspective3::new(
         T::from(1.0).unwrap(),
-        compute_solution.field_of_view,
+        compute_solution.field_of_view(),
         T::from(0.01).unwrap(),
         T::from(10.0).unwrap(),
     );
 
     let mut matrix = perspective.into_inner();
-    *matrix.index_mut((0, 2)) = -compute_solution.ortho_center.x;
-    *matrix.index_mut((1, 2)) = -compute_solution.ortho_center.y;
+    *matrix.index_mut((0, 2)) = -compute_solution.ortho_center().x;
+    *matrix.index_mut((1, 2)) = -compute_solution.ortho_center().y;
 
-    let model_view_projection = matrix * compute_solution.view_transform;
+    let model_view_projection = matrix * compute_solution.view_transform();
     let model_view_projection = model_view_projection.try_inverse()?;
     let last_point_axis = Vector3::zeros();
     let point = model_view_projection * Point3::from(last_point_axis).to_homogeneous();
@@ -174,33 +174,6 @@ pub fn calculate_cursor_position_to_3d<
     let intersection1_3d =
         line_insert_with_plane(&last_point, &axis, &point3d1.coords, &point3d2.coords);
     Some(intersection1_3d)
-}
-
-pub fn calculate_location_position_to_2d<T: Float + RealField>(
-    compute_solution: &Option<ComputeSolution<T>>,
-    location3d: &Vector3<T>,
-) -> Option<Vector2<T>> {
-    let Some(compute_solution) = &compute_solution else {
-        return None;
-    };
-    let perspective = Perspective3::new(
-        T::from(1.0).unwrap(),
-        compute_solution.field_of_view,
-        T::from(0.01).unwrap(),
-        T::from(10.0).unwrap(),
-    );
-
-    let mut matrix = perspective.into_inner();
-    *matrix.index_mut((0, 2)) = -compute_solution.ortho_center.x;
-    *matrix.index_mut((1, 2)) = -compute_solution.ortho_center.y;
-
-    let transform = matrix * compute_solution.view_transform;
-    let point = Point3::from(*location3d);
-
-    let point = transform * point.to_homogeneous();
-    let point = Point3::from_homogeneous(point)?;
-
-    Some(point.xy().coords)
 }
 
 pub fn line_insert_with_yz_plane(
