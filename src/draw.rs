@@ -14,6 +14,7 @@ use iced::{
     },
     event::Status,
     keyboard::{self, Key},
+    mouse::ScrollDelta,
     widget::canvas::{self, Event, Fill, Stroke, Text},
 };
 use nalgebra::{Vector2, Vector3};
@@ -106,6 +107,13 @@ where
         };
         let adjusted_cursor = cursor - bounds.position();
         match event {
+            Event::Mouse(mouse::Event::WheelScrolled {
+                delta: ScrollDelta::Lines { x: _x, y },
+            }) => {
+                let delta = y / 1000.0;
+                state.captured_delta += delta;
+                (Status::Captured, None)
+            }
             Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Right)) => {
                 state.edit_state = Edit::Draw;
                 (Status::Ignored, None)
@@ -118,7 +126,6 @@ where
                             state.selected = index;
                             self.custom_origin_translation
                                 .replace(self.draw_lines.borrow().get(index).copied());
-                            self.draw_cache.clear();
                             return (Status::Captured, None);
                         };
                     }
@@ -134,7 +141,6 @@ where
                         })
                         .map(|(index, _items)| {
                             self.custom_scale_segment.borrow_mut().replace(index);
-                            self.draw_cache.clear();
                         })
                         .iter()
                         .count()
@@ -148,7 +154,6 @@ where
                     for (index, point) in state.points.borrow().iter().enumerate() {
                         if cursor.distance(*point) < 10.0 {
                             state.selected = index;
-                            self.draw_cache.clear();
                             return (Status::Ignored, None);
                         };
                     }
@@ -156,17 +161,19 @@ where
                 (Status::Ignored, None)
             }
             Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
-                let Some((new_point_3d, _last_point_3d, _color)) =
+                let Some((new_point_3d, last_point_3d, _color)) =
                     self.extract_last_point_details_for_mode(state, bounds, &adjusted_cursor)
                 else {
                     return (Status::Ignored, None);
                 };
 
+                let new_point_3d =
+                    new_point_3d + (last_point_3d - new_point_3d) * state.captured_delta;
+
                 match &state.edit_state {
                     Edit::Extrude(_axis) => {
                         self.draw_lines.borrow_mut().push(new_point_3d);
                         self.draw_lines_cache.clear();
-                        self.draw_cache.clear();
                         state.edit_state = Edit::Draw;
                     }
                     Edit::Scale(axis) => {
@@ -180,7 +187,6 @@ where
                             axis: axis.clone(),
                         });
                         self.draw_lines_cache.clear();
-                        self.draw_cache.clear();
                         state.edit_state = Edit::Draw;
                     }
                     Edit::MarkError(axis) => {
@@ -194,16 +200,15 @@ where
                             axis: axis.clone(),
                         });
                         self.draw_lines_cache.clear();
-                        self.draw_cache.clear();
                         state.edit_state = Edit::Draw;
                     }
                     _ => (),
                 }
-                (Status::Ignored, None)
+                (Status::Captured, None)
             }
             Event::Mouse(mouse::Event::CursorMoved { position: _ }) => match state.edit_state {
                 Edit::Extrude(_) | Edit::Scale(_) | Edit::MarkError(_) => {
-                    self.draw_cache.clear();
+                    state.captured_delta = 0.0;
                     (Status::Captured, None)
                 }
                 _ => (Status::Ignored, None),
@@ -263,20 +268,19 @@ where
                         },
                         "c" => {
                             state.edit_state = Edit::Extrude(EditAxis::None);
-                            (Status::Ignored, None)
+                            (Status::Captured, None)
                         }
                         "d" => {
                             if self.draw_lines.borrow().len() > 1 {
                                 self.draw_lines.borrow_mut().pop();
                                 self.draw_lines_cache.clear();
-                                self.draw_cache.clear();
                             }
                             state.edit_state = Edit::Draw;
                             (Status::Captured, None)
                         }
                         "q" => {
                             state.edit_state = Edit::MarkError(EditAxis::None);
-                            (Status::Ignored, None)
+                            (Status::Captured, None)
                         }
                         _ => {
                             state.edit_state = Edit::Draw;
@@ -478,6 +482,8 @@ where
             else {
                 return;
             };
+
+            let new_point_3d = new_point_3d + (last_point_3d - new_point_3d) * state.captured_delta;
 
             let last_point = to_canvas(
                 bounds.size(),
@@ -717,6 +723,8 @@ where
         //    self.handle_internal_event(state, message);
         //}
         if let Status::Captured = event_status {
+            self.draw_cache.clear();
+            shell.capture_event();
             shell.request_redraw();
         }
     }
@@ -769,15 +777,11 @@ where
 
 #[derive(Default, Clone)]
 pub struct State {
-    pub first_point: Point,
     pub selected: usize,
-    pub is_second_point: bool,
-    pub highlight: Option<usize>,
     pub edit: Option<Component>,
-    pub image_path: String,
-    pub mouse3d_position: Vector3<f32>,
     pub edit_state: Edit,
     pub points: RefCell<Vec<Point>>,
+    pub captured_delta: f32,
 }
 
 impl<'a, Message, Theme, Renderer> From<DrawLine<'a, Message, Theme, Renderer>>
