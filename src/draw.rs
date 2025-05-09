@@ -13,7 +13,7 @@ use iced::{
         },
     },
     event::Status,
-    keyboard::{self, Key},
+    keyboard::{self, Key, key::Named},
     mouse::ScrollDelta,
     widget::canvas::{self, Event, Fill, Stroke, Text},
 };
@@ -210,83 +210,90 @@ where
                 }
                 _ => (Status::Ignored, None),
             },
-            Event::Keyboard(keyboard::Event::KeyPressed { key, .. }) => {
-                if let Key::Character(c) = key {
-                    let c = c.as_str();
-                    match c {
-                        "x" => {
-                            state.edit_state = Edit::Scale(EditAxis::None);
-                            (Status::Captured, None)
-                        }
-                        "r" => match state.edit_state {
-                            Edit::Extrude(_) => {
-                                state.edit_state = Edit::Extrude(EditAxis::EditX);
-                                (Status::Captured, None)
-                            }
-                            Edit::Scale(_) => {
-                                state.edit_state = Edit::Scale(EditAxis::EditX);
-                                (Status::Captured, None)
-                            }
-                            Edit::MarkError(_) => {
-                                state.edit_state = Edit::MarkError(EditAxis::EditX);
-                                (Status::Captured, None)
-                            }
-                            _ => (Status::Ignored, None),
-                        },
-                        "s" => match state.edit_state {
-                            Edit::Extrude(_) => {
-                                state.edit_state = Edit::Extrude(EditAxis::EditY);
-                                (Status::Captured, None)
-                            }
-                            Edit::Scale(_) => {
-                                state.edit_state = Edit::Scale(EditAxis::EditY);
-                                (Status::Captured, None)
-                            }
-                            Edit::MarkError(_) => {
-                                state.edit_state = Edit::MarkError(EditAxis::EditY);
-                                (Status::Captured, None)
-                            }
-                            _ => (Status::Ignored, None),
-                        },
-                        "t" => match state.edit_state {
-                            Edit::Extrude(_) => {
-                                state.edit_state = Edit::Extrude(EditAxis::EditZ);
-                                (Status::Captured, None)
-                            }
-                            Edit::Scale(_) => {
-                                state.edit_state = Edit::Scale(EditAxis::EditZ);
-                                (Status::Captured, None)
-                            }
-                            Edit::MarkError(_) => {
-                                state.edit_state = Edit::MarkError(EditAxis::EditZ);
-                                (Status::Captured, None)
-                            }
-                            _ => (Status::Ignored, None),
-                        },
-                        "c" => {
-                            state.edit_state = Edit::Extrude(EditAxis::None);
-                            (Status::Captured, None)
-                        }
-                        "d" => {
-                            if self.draw_lines.borrow().len() > 1 {
-                                self.draw_lines.borrow_mut().pop();
-                                self.draw_lines_cache.clear();
-                            }
-                            state.edit_state = Edit::Draw;
-                            (Status::Captured, None)
-                        }
-                        "q" => {
-                            state.edit_state = Edit::MarkError(EditAxis::None);
-                            (Status::Captured, None)
-                        }
-                        _ => {
-                            state.edit_state = Edit::Draw;
-                            (Status::Ignored, None)
-                        }
+            Event::Keyboard(keyboard::Event::KeyPressed {
+                key: Key::Character(c),
+                ..
+            }) => {
+                let c = c.as_str();
+                match c {
+                    "x" => {
+                        state.edit_state = Edit::Scale(EditAxis::None);
+                        (Status::Captured, None)
                     }
-                } else {
-                    (Status::Ignored, None)
+                    "r" => match state.edit_state {
+                        Edit::Extrude(_) => {
+                            state.edit_state = Edit::Extrude(EditAxis::EditX);
+                            (Status::Captured, None)
+                        }
+                        Edit::Scale(_) => {
+                            state.edit_state = Edit::Scale(EditAxis::EditX);
+                            (Status::Captured, None)
+                        }
+                        Edit::MarkError(_) => {
+                            state.edit_state = Edit::MarkError(EditAxis::EditX);
+                            (Status::Captured, None)
+                        }
+                        _ => (Status::Ignored, None),
+                    },
+                    "s" => match state.edit_state {
+                        Edit::Extrude(_) => {
+                            state.edit_state = Edit::Extrude(EditAxis::EditY);
+                            (Status::Captured, None)
+                        }
+                        Edit::Scale(_) => {
+                            state.edit_state = Edit::Scale(EditAxis::EditY);
+                            (Status::Captured, None)
+                        }
+                        Edit::MarkError(_) => {
+                            state.edit_state = Edit::MarkError(EditAxis::EditY);
+                            (Status::Captured, None)
+                        }
+                        _ => (Status::Ignored, None),
+                    },
+                    "t" => match state.edit_state {
+                        Edit::Extrude(_) => {
+                            state.edit_state = Edit::Extrude(EditAxis::EditZ);
+                            (Status::Captured, None)
+                        }
+                        Edit::Scale(_) => {
+                            state.edit_state = Edit::Scale(EditAxis::EditZ);
+                            (Status::Captured, None)
+                        }
+                        Edit::MarkError(_) => {
+                            state.edit_state = Edit::MarkError(EditAxis::EditZ);
+                            (Status::Captured, None)
+                        }
+                        _ => (Status::Ignored, None),
+                    },
+                    "c" => {
+                        state.edit_state = Edit::Extrude(EditAxis::None);
+                        (Status::Captured, None)
+                    }
+                    "d" => {
+                        if self.draw_lines.borrow().len() > 1 {
+                            self.draw_lines.borrow_mut().pop();
+                            self.draw_lines_cache.clear();
+                        }
+                        state.edit_state = Edit::Draw;
+                        (Status::Captured, None)
+                    }
+                    "q" => {
+                        state.edit_state = Edit::MarkError(EditAxis::None);
+                        (Status::Captured, None)
+                    }
+                    _ => {
+                        state.edit_state = Edit::Draw;
+                        (Status::Ignored, None)
+                    }
                 }
+            }
+            Event::Keyboard(keyboard::Event::KeyPressed {
+                key: Key::Named(Named::Escape),
+                ..
+            }) => {
+                self.draw_lines_cache.clear();
+                state.edit_state = Edit::Draw;
+                (Status::Captured, None)
             }
             _ => (Status::Ignored, None),
         }

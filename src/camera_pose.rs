@@ -15,7 +15,7 @@ use iced::{
         },
     },
     event::Status,
-    keyboard::{self, Key},
+    keyboard::{self, Key, key::Named},
     mouse::ScrollDelta,
     widget::canvas::{self, Event, Fill, LineDash, Stroke, Text},
 };
@@ -148,46 +148,63 @@ where
         let cursor = cursor - bounds.position();
         let scale_cursor = scale_point(cursor, bounds.size());
         match event {
-            Event::Keyboard(keyboard::Event::KeyPressed { key, .. }) => {
-                if let Key::Character(c) = key {
-                    let c = c.as_str();
-                    match c {
-                        "r" => match state.edit_state {
-                            Edit::ControlPoint(_) => {
-                                state.captured_delta = 0.0;
-                                self.cache.clear();
-                                state.edit_state = Edit::ControlPoint(EditAxis::EditX);
-                                (Status::Captured, None)
-                            }
-                            Edit::VanishingPoint(_) => {
-                                state.captured_delta = 0.0;
-                                self.cache.clear();
-                                state.edit_state = Edit::VanishingPoint(EditAxis::EditX);
-                                (Status::Captured, None)
-                            }
-                            _ => (Status::Captured, None),
-                        },
-                        "s" => match state.edit_state {
-                            Edit::ControlPoint(_) => {
-                                state.captured_delta = 0.0;
-                                self.cache.clear();
-                                state.edit_state = Edit::ControlPoint(EditAxis::EditY);
-                                (Status::Captured, None)
-                            }
-                            Edit::VanishingPoint(_) => {
-                                state.captured_delta = 0.0;
-                                self.cache.clear();
-                                state.edit_state = Edit::VanishingPoint(EditAxis::EditY);
-                                (Status::Captured, None)
-                            }
-                            _ => (Status::Captured, None),
-                        },
-                        _ => (Status::Ignored, None),
-                    }
-                } else {
-                    (Status::Ignored, None)
+            Event::Keyboard(keyboard::Event::KeyPressed {
+                key: Key::Character(c),
+                ..
+            }) => {
+                let c = c.as_str();
+                match c {
+                    "r" => match state.edit_state {
+                        Edit::ControlPoint(_) => {
+                            state.captured_delta = 0.0;
+                            self.cache.clear();
+                            state.edit_state = Edit::ControlPoint(EditAxis::EditX);
+                            (Status::Captured, None)
+                        }
+                        Edit::VanishingPoint(_) => {
+                            state.captured_delta = 0.0;
+                            self.cache.clear();
+                            state.edit_state = Edit::VanishingPoint(EditAxis::EditX);
+                            (Status::Captured, None)
+                        }
+                        _ => (Status::Captured, None),
+                    },
+                    "s" => match state.edit_state {
+                        Edit::ControlPoint(_) => {
+                            state.captured_delta = 0.0;
+                            self.cache.clear();
+                            state.edit_state = Edit::ControlPoint(EditAxis::EditY);
+                            (Status::Captured, None)
+                        }
+                        Edit::VanishingPoint(_) => {
+                            state.captured_delta = 0.0;
+                            self.cache.clear();
+                            state.edit_state = Edit::VanishingPoint(EditAxis::EditY);
+                            (Status::Captured, None)
+                        }
+                        _ => (Status::Captured, None),
+                    },
+                    _ => (Status::Ignored, None),
                 }
             }
+            Event::Keyboard(keyboard::Event::KeyPressed {
+                key: Key::Named(Named::Escape),
+                ..
+            }) => match &state.edit_state {
+                Edit::ControlPoint(_) => (
+                    Status::Captured,
+                    Some(CameraPoseMessage::MoveControlPoint {
+                        cursor: Point::new(state.captured.unwrap().x, state.captured.unwrap().y),
+                    }),
+                ),
+                Edit::VanishingPoint(_) => (
+                    Status::Captured,
+                    Some(CameraPoseMessage::EditEndpoint {
+                        cursor: Point::new(state.captured.unwrap().x, state.captured.unwrap().y),
+                    }),
+                ),
+                _ => (Status::Ignored, None),
+            },
             Event::Mouse(mouse::Event::WheelScrolled {
                 delta: ScrollDelta::Lines { x: _x, y },
             }) => {
@@ -247,8 +264,7 @@ where
                         } else if let Some(line_index) = state.highlight {
                             let (p1, p2) = self.axis_data.borrow_mut().axis_lines[line_index];
                             if should_edit_point(clicked_position, p1) {
-                                state.captured =
-                                    Some(Vector::new(clicked_position.x, clicked_position.y));
+                                state.captured = Some(Vector::new(p1.x, p1.y));
 
                                 state.edit_state = Edit::VanishingPoint(EditAxis::None);
                                 state.captured_delta = 0.0;
@@ -259,8 +275,7 @@ where
                                     }),
                                 )
                             } else if should_edit_point(clicked_position, p2) {
-                                state.captured =
-                                    Some(Vector::new(clicked_position.x, clicked_position.y));
+                                state.captured = Some(Vector::new(p2.x, p2.y));
                                 state.edit_state = Edit::VanishingPoint(EditAxis::None);
                                 state.captured_delta = 0.0;
                                 (
@@ -291,7 +306,10 @@ where
                     self.axis_data.borrow().control_point,
                     scale_cursor,
                 ) {
-                    state.captured = Some(Vector::new(scale_cursor.x, scale_cursor.y));
+                    state.captured = Some(Vector::new(
+                        self.axis_data.borrow().control_point.x,
+                        self.axis_data.borrow().control_point.y,
+                    ));
                     state.edit_state = Edit::ControlPoint(EditAxis::None);
                     self.cache.clear();
                     return (Status::Captured, None);
