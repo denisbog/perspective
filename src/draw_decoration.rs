@@ -22,7 +22,8 @@ pub fn draw_vanishing_points<Renderer>(
     edit: &Edit,
     bounds: Rectangle,
     frame: &mut Frame<Renderer>,
-) where
+) -> (Vector2<f32>, Vector2<f32>, Vector2<f32>)
+where
     Renderer: geometry::Renderer,
 {
     let mut builder = canvas::path::Builder::new();
@@ -107,6 +108,8 @@ pub fn draw_vanishing_points<Renderer>(
             ..Stroke::default()
         },
     );
+
+    (vanishing_point_x, vanishing_point_y, vanishing_point_z)
 }
 
 pub fn draw_grid_for_origin<Renderer>(

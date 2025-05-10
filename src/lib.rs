@@ -69,6 +69,7 @@ pub enum Edit {
     Extrude(EditAxis),
     Scale(EditAxis),
     VanishingPoint(EditAxis),
+    VanishingLines(EditAxis),
     #[default]
     None,
 }

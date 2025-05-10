@@ -49,6 +49,7 @@ where
     cache: geometry::Cache<Renderer>,
     axis_cache: geometry::Cache<Renderer>,
     draw_cache: geometry::Cache<Renderer>,
+    vanishing_lines_cache: geometry::Cache<Renderer>,
 
     compute_solution: &'a Option<ComputeSolution<f32>>,
     renderer_: PhantomData<Renderer>,
@@ -56,6 +57,7 @@ where
     axis_data: Rc<RefCell<AxisData>>,
     image_size: Size<f32>,
     draw_lines: Rc<RefCell<Vec<Vector3<f32>>>>,
+    vanishing_points: Rc<RefCell<Vec<(EditAxis, Point)>>>,
 }
 impl<'a, M, Theme, Renderer> ComputeCameraPose<'a, M, Theme, Renderer>
 where
@@ -78,8 +80,10 @@ where
             cache: geometry::Cache::default(),
             axis_cache: geometry::Cache::default(),
             draw_cache: geometry::Cache::default(),
+            vanishing_lines_cache: geometry::Cache::default(),
             draw_lines,
             image_size: Size::default(),
+            vanishing_points: Rc::new(RefCell::new(Vec::<(EditAxis, Point)>::new())),
         }
     }
     pub fn width(mut self, width: impl Into<Length>) -> Self {
@@ -154,6 +158,16 @@ where
             }) => {
                 let c = c.as_str();
                 match c {
+                    "w" => {
+                        if let Edit::VanishingLines(_) = state.edit_state {
+                            state.edit_state = Edit::None;
+                            self.vanishing_lines_cache.clear();
+                        } else {
+                            state.edit_state = Edit::VanishingLines(EditAxis::None);
+                            self.vanishing_lines_cache.clear();
+                        }
+                        (Status::Captured, None)
+                    }
                     "r" => match state.edit_state {
                         Edit::ControlPoint(_) => {
                             state.captured_delta = 0.0;
@@ -165,6 +179,13 @@ where
                             state.captured_delta = 0.0;
                             self.cache.clear();
                             state.edit_state = Edit::VanishingPoint(EditAxis::EditX);
+                            (Status::Captured, None)
+                        }
+                        Edit::VanishingLines(_) => {
+                            state.captured_delta = 0.0;
+                            self.vanishing_lines_cache.clear();
+                            self.cache.clear();
+                            state.edit_state = Edit::VanishingLines(EditAxis::EditX);
                             (Status::Captured, None)
                         }
                         _ => (Status::Captured, None),
@@ -180,6 +201,23 @@ where
                             state.captured_delta = 0.0;
                             self.cache.clear();
                             state.edit_state = Edit::VanishingPoint(EditAxis::EditY);
+                            (Status::Captured, None)
+                        }
+                        Edit::VanishingLines(_) => {
+                            state.captured_delta = 0.0;
+                            self.cache.clear();
+                            self.vanishing_lines_cache.clear();
+                            state.edit_state = Edit::VanishingLines(EditAxis::EditY);
+                            (Status::Captured, None)
+                        }
+                        _ => (Status::Captured, None),
+                    },
+                    "t" => match state.edit_state {
+                        Edit::VanishingLines(_) => {
+                            state.captured_delta = 0.0;
+                            self.cache.clear();
+                            self.vanishing_lines_cache.clear();
+                            state.edit_state = Edit::VanishingLines(EditAxis::EditZ);
                             (Status::Captured, None)
                         }
                         _ => (Status::Captured, None),
@@ -219,7 +257,7 @@ where
                         state.captured.unwrap()
                             - Vector::new(state.captured.unwrap().x, scale_cursor.y)
                     }
-                    _ => state.captured.unwrap() - Vector::new(scale_cursor.x, scale_cursor.y),
+                    _ => Vector::new(scale_cursor.x, scale_cursor.y),
                 };
                 match &state.edit_state {
                     Edit::ControlPoint(_) => (
@@ -241,6 +279,13 @@ where
                 let clicked_position = scale_cursor;
                 state.captured = Some(Vector::new(clicked_position.x, clicked_position.y));
                 match &state.edit_state {
+                    Edit::VanishingLines(axis) => {
+                        self.vanishing_points
+                            .borrow_mut()
+                            .push((axis.clone(), Point::new(cursor.x, cursor.y)));
+                        self.vanishing_lines_cache.clear();
+                        (Status::Captured, None)
+                    }
                     Edit::ControlPoint(_) => {
                         state.edit_state = Edit::None;
                         self.cache.clear();
@@ -352,6 +397,10 @@ where
                             cursor: scale_cursor,
                         }),
                     ),
+                    Edit::VanishingLines(_) => {
+                        self.vanishing_lines_cache.clear();
+                        (Status::Captured, None)
+                    }
                     Edit::None => (
                         Status::Captured,
                         Some(CameraPoseMessage::EditEndpoint {
@@ -473,8 +522,8 @@ where
                     frame.stroke(
                         &path,
                         Stroke {
-                            style: canvas::Style::Solid(Color::from_rgba(0.0, 0.0, 0.9, 0.7)),
-                            width: 2.0,
+                            style: canvas::Style::Solid(Color::from_rgba(1.0, 1.0, 0.9, 0.7)),
+                            width: 1.0,
                             ..Stroke::default()
                         },
                     );
@@ -584,13 +633,14 @@ where
                     ..Stroke::default()
                 },
             );
-            draw_vanishing_points(
+
+            state.vanishing_points.replace(draw_vanishing_points(
                 &self.axis_data.borrow().control_point,
                 &self.axis_data.borrow().axis_lines,
                 &state.edit_state,
                 bounds,
                 frame,
-            );
+            ));
 
             match state.edit_state {
                 Edit::ControlPoint(_) | Edit::VanishingPoint(_) => {
@@ -687,7 +737,113 @@ where
             }
         });
 
-        vec![draw, axis_cache, draw_cache]
+        let vanishing_lines_cache =
+            self.vanishing_lines_cache
+                .draw(renderer, bounds.size(), |frame| {
+                    let (vanishing_point_x, vanishing_point_y, vanishing_point_z) =
+                        *state.vanishing_points.borrow();
+                    if let Some(_position) = cursor.position() {
+                        let current_cursor = cursor.position().unwrap() - bounds.position();
+                        let mut builder = canvas::path::Builder::new();
+                        self.vanishing_points.borrow().iter().cloned().for_each(
+                            |(axis, current_cursor)| match axis {
+                                EditAxis::EditX => {
+                                    builder.move_to(scale_point_to_canvas(
+                                        &Point::new(vanishing_point_x.x, vanishing_point_x.y),
+                                        bounds.size(),
+                                    ));
+                                    builder.line_to(current_cursor);
+                                }
+                                EditAxis::EditY => {
+                                    builder.move_to(scale_point_to_canvas(
+                                        &Point::new(vanishing_point_y.x, vanishing_point_y.y),
+                                        bounds.size(),
+                                    ));
+                                    builder.line_to(current_cursor);
+                                }
+                                EditAxis::EditZ => {
+                                    builder.move_to(scale_point_to_canvas(
+                                        &Point::new(vanishing_point_z.x, vanishing_point_z.y),
+                                        bounds.size(),
+                                    ));
+                                    builder.line_to(current_cursor);
+                                }
+                                EditAxis::None => {
+                                    builder.move_to(scale_point_to_canvas(
+                                        &Point::new(vanishing_point_x.x, vanishing_point_x.y),
+                                        bounds.size(),
+                                    ));
+                                    builder.line_to(current_cursor);
+                                    builder.move_to(scale_point_to_canvas(
+                                        &Point::new(vanishing_point_y.x, vanishing_point_y.y),
+                                        bounds.size(),
+                                    ));
+                                    builder.line_to(current_cursor);
+                                    builder.move_to(scale_point_to_canvas(
+                                        &Point::new(vanishing_point_z.x, vanishing_point_z.y),
+                                        bounds.size(),
+                                    ));
+                                    builder.line_to(current_cursor);
+                                }
+                            },
+                        );
+
+                        match state.edit_state {
+                            Edit::VanishingLines(EditAxis::EditX) => {
+                                builder.move_to(scale_point_to_canvas(
+                                    &Point::new(vanishing_point_x.x, vanishing_point_x.y),
+                                    bounds.size(),
+                                ));
+                                builder.line_to(Point::new(current_cursor.x, current_cursor.y));
+                            }
+                            Edit::VanishingLines(EditAxis::EditY) => {
+                                builder.move_to(scale_point_to_canvas(
+                                    &Point::new(vanishing_point_y.x, vanishing_point_y.y),
+                                    bounds.size(),
+                                ));
+                                builder.line_to(Point::new(current_cursor.x, current_cursor.y));
+                            }
+                            Edit::VanishingLines(EditAxis::EditZ) => {
+                                builder.move_to(scale_point_to_canvas(
+                                    &Point::new(vanishing_point_z.x, vanishing_point_z.y),
+                                    bounds.size(),
+                                ));
+                                builder.line_to(Point::new(current_cursor.x, current_cursor.y));
+                            }
+                            Edit::VanishingLines(EditAxis::None) => {
+                                builder.move_to(scale_point_to_canvas(
+                                    &Point::new(vanishing_point_x.x, vanishing_point_x.y),
+                                    bounds.size(),
+                                ));
+                                builder.line_to(Point::new(current_cursor.x, current_cursor.y));
+
+                                builder.move_to(scale_point_to_canvas(
+                                    &Point::new(vanishing_point_y.x, vanishing_point_y.y),
+                                    bounds.size(),
+                                ));
+                                builder.line_to(Point::new(current_cursor.x, current_cursor.y));
+
+                                builder.move_to(scale_point_to_canvas(
+                                    &Point::new(vanishing_point_z.x, vanishing_point_z.y),
+                                    bounds.size(),
+                                ));
+                                builder.line_to(Point::new(current_cursor.x, current_cursor.y));
+                            }
+                            _ => {}
+                        }
+
+                        let path = builder.build();
+                        frame.stroke(
+                            &path,
+                            Stroke {
+                                style: canvas::Style::Solid(Color::from_rgba(0.9, 0.9, 0.9, 0.9)),
+                                width: 1.0,
+                                ..Stroke::default()
+                            },
+                        );
+                    }
+                });
+        vec![draw, axis_cache, draw_cache, vanishing_lines_cache]
     }
 
     fn compute_pose(&self, state: &mut State) {
@@ -828,6 +984,7 @@ pub struct State {
     pub compute_solution: Option<ComputeSolution<f32>>,
     pub captured: Option<Vector>,
     pub captured_delta: f32,
+    pub vanishing_points: RefCell<(Vector2<f32>, Vector2<f32>, Vector2<f32>)>,
 }
 
 impl<'a, Message, Theme, Renderer> From<ComputeCameraPose<'a, Message, Theme, Renderer>>

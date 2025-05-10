@@ -1,13 +1,12 @@
-use ::zoomer::zoom_viewer;
-use iced::widget::image::Handle;
+pub(crate) use iced::widget::image::Handle;
 use iced::widget::{center, column};
 use iced::{Center, Element};
-
+use zoomer::zoom_viewer::zoomer;
 #[derive(Debug, Clone, Copy)]
 enum Message {}
 
 pub fn main() -> iced::Result {
-    iced::run("Zoom Widget - Iced", Example::update, Example::view)
+    iced::run(Example::update, Example::view)
 }
 
 struct Example {}
@@ -18,7 +17,7 @@ impl Example {
     }
 
     fn view(&self) -> Element<Message> {
-        let content = column!(zoom_viewer(Handle::from_path("perspective.jpg")))
+        let content = column!(zoomer(Handle::from_path("perspective.jpg")))
             .padding(20)
             .spacing(20)
             .max_width(500)
