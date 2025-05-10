@@ -56,8 +56,8 @@ pub fn main() -> iced::Result {
 
 #[derive(Default, Clone, Debug)]
 enum UiMod {
-    Pose,
     #[default]
+    Pose,
     Draw,
     Scale,
     Try,
@@ -565,6 +565,16 @@ impl Perspective {
                     buttons.push(
                         mouse_area(container("Perform calculations").width(Length::Fill))
                             .on_press(Message::CalculatePose)
+                            .into(),
+                    );
+                    buttons.push(
+                        mouse_area(container("Apply Translation").width(Length::Fill))
+                            .on_press(Message::ApplyTranslation)
+                            .into(),
+                    );
+                    buttons.push(
+                        mouse_area(container("Apply Scale").width(Length::Fill))
+                            .on_press(Message::ApplyScale)
                             .into(),
                     );
                     buttons.push(

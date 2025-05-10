@@ -20,7 +20,6 @@ use iced::{
     widget::canvas::{self, Event, Fill, LineDash, Stroke, Text},
 };
 use nalgebra::{Matrix3, Perspective3, Point2, Vector2, Vector3};
-use tracing::trace;
 
 use crate::{
     AxisData, Component, Edit, EditAxis, PointInformation,
@@ -41,7 +40,7 @@ enum CameraPoseMessage {
     Editline { component: Option<Component> },
     MoveControlPoint { cursor: Point },
 }
-pub struct ComputeCameraPoseAll<'a, Message, Theme = iced::Theme, Renderer = iced::Renderer>
+pub struct ComputeCameraPoseAll<Message, Theme = iced::Theme, Renderer = iced::Renderer>
 where
     Renderer: geometry::Renderer,
 {
@@ -50,11 +49,10 @@ where
     message_: PhantomData<Message>,
     cache: geometry::Cache<Renderer>,
     axis_cache: geometry::Cache<Renderer>,
-    draw_cache: geometry::Cache<Renderer>,
     draw_lines_cache: geometry::Cache<Renderer>,
     vanishing_lines_cache: geometry::Cache<Renderer>,
 
-    compute_solution: &'a Option<ComputeSolution<f32>>,
+    compute_solution: RefCell<Option<ComputeSolution<f32>>>,
     renderer_: PhantomData<Renderer>,
     theme_: PhantomData<Theme>,
     axis_data: Rc<RefCell<AxisData>>,
@@ -66,7 +64,7 @@ where
     custom_scale: Rc<RefCell<Option<PointInformation<f32>>>>,
     custom_error: Rc<RefCell<Option<PointInformation<f32>>>>,
 }
-impl<'a, M, Theme, Renderer> ComputeCameraPoseAll<'a, M, Theme, Renderer>
+impl<'a, M, Theme, Renderer> ComputeCameraPoseAll<M, Theme, Renderer>
 where
     Renderer: geometry::Renderer,
 {
@@ -84,14 +82,13 @@ where
         ComputeCameraPoseAll {
             width: Length::Fixed(Self::DEFAULT_SIZE),
             height: Length::Fixed(Self::DEFAULT_SIZE),
-            compute_solution,
+            compute_solution: RefCell::new(compute_solution.clone()),
             axis_data,
             message_: PhantomData,
             renderer_: PhantomData,
             theme_: PhantomData,
             cache: geometry::Cache::default(),
             axis_cache: geometry::Cache::default(),
-            draw_cache: geometry::Cache::default(),
             draw_lines_cache: geometry::Cache::new(),
             vanishing_lines_cache: geometry::Cache::default(),
             draw_lines,
@@ -146,13 +143,15 @@ where
                     };
                     self.cache.clear();
                     self.vanishing_lines_cache.clear();
-                    self.compute_pose(state);
+                    self.draw_lines_cache.clear();
+                    self.compute_pose();
                 }
             }
             CameraPoseMessage::MoveControlPoint { cursor } => {
                 self.axis_data.borrow_mut().control_point = cursor;
                 self.cache.clear();
-                self.compute_pose(state);
+                self.draw_lines_cache.clear();
+                self.compute_pose();
             }
         }
     }
@@ -581,67 +580,6 @@ where
         bounds: Rectangle,
         cursor: mouse::Cursor,
     ) -> Vec<Renderer::Geometry> {
-        let draw_cache = self.draw_cache.draw(renderer, bounds.size(), |frame| {
-            *state.points.borrow_mut() = self
-                .draw_lines
-                .borrow()
-                .iter()
-                .flat_map(|item| {
-                    state
-                        .compute_solution
-                        .as_ref()?
-                        .calculate_location_position_to_2d(item)
-                })
-                .map(|item| to_canvas(bounds.size(), &item))
-                .map(|item| Point::new(item.x, item.y))
-                .collect();
-
-            let mut builder = canvas::path::Builder::new();
-            state
-                .points
-                .borrow()
-                .windows(2)
-                .enumerate()
-                .for_each(|(index, items)| {
-                    let start = items[0];
-                    let end = items[1];
-                    builder.move_to(start);
-                    builder.line_to(end);
-                    let location3d_a = *self.draw_lines.borrow().get(index).unwrap();
-                    let location3d_b = *self.draw_lines.borrow().get(index + 1).unwrap();
-                    let distance = (location3d_b - location3d_a).norm();
-
-                    frame.fill_rectangle(
-                        Point::new(end.x + 2.0, end.y + 2.0),
-                        Size::new(150.0, 15.0),
-                        Fill {
-                            style: canvas::Style::Solid(Color::from_rgba(0.3, 0.3, 0.3, 0.8)),
-                            ..Fill::default()
-                        },
-                    );
-                    frame.fill_text(Text {
-                        content: format!(
-                            "{:>7.3},{:>7.3},{:>7.3} ({:.3})",
-                            location3d_b.x, location3d_b.y, location3d_b.z, distance
-                        ),
-                        position: Point::new(end.x + 4.0, end.y + 4.0),
-                        color: Color::from_rgba(0.8, 0.8, 0.8, 0.8),
-                        size: Pixels(10.0),
-                        ..Default::default()
-                    });
-                });
-
-            let path = builder.build();
-            frame.stroke(
-                &path,
-                Stroke {
-                    style: canvas::Style::Solid(Color::from_rgba(0.8, 0.8, 0.8, 0.8)),
-                    width: 2.0,
-                    ..Stroke::default()
-                },
-            );
-        });
-
         let color_red = Color::from_rgba(0.8, 0.2, 0.2, 0.8);
         let color_green = Color::from_rgba(0.2, 0.8, 0.2, 0.8);
         let color_blue = Color::from_rgba(0.2, 0.2, 0.8, 0.8);
@@ -700,6 +638,7 @@ where
                         bounds.size(),
                         &self
                             .compute_solution
+                            .borrow()
                             .as_ref()
                             .unwrap()
                             .calculate_location_position_to_2d(&scale.source_vector)
@@ -709,6 +648,7 @@ where
                         bounds.size(),
                         &self
                             .compute_solution
+                            .borrow()
                             .as_ref()
                             .unwrap()
                             .calculate_location_position_to_2d(&scale.vector)
@@ -734,6 +674,7 @@ where
                         bounds.size(),
                         &self
                             .compute_solution
+                            .borrow()
                             .as_ref()
                             .unwrap()
                             .calculate_location_position_to_2d(&custom_error.source_vector)
@@ -743,6 +684,7 @@ where
                         bounds.size(),
                         &self
                             .compute_solution
+                            .borrow()
                             .as_ref()
                             .unwrap()
                             .calculate_location_position_to_2d(&custom_error.vector)
@@ -979,6 +921,7 @@ where
                         bounds.size(),
                         &self
                             .compute_solution
+                            .borrow()
                             .as_ref()
                             .unwrap()
                             .calculate_location_position_to_2d(&last_point_3d)
@@ -989,6 +932,7 @@ where
                         bounds.size(),
                         &self
                             .compute_solution
+                            .borrow()
                             .as_ref()
                             .unwrap()
                             .calculate_location_position_to_2d(&new_point_3d)
@@ -1026,7 +970,7 @@ where
         });
 
         let axis_cache = self.axis_cache.draw(renderer, bounds.size(), |frame| {
-            if let Some(compute_solution) = &self.compute_solution {
+            if let Some(compute_solution) = self.compute_solution.borrow().as_ref() {
                 let dc_to_image = Matrix3::new_nonuniform_scaling(&Vector2::new(
                     bounds.width / 2.0,
                     bounds.width / -2.0,
@@ -1191,6 +1135,7 @@ where
                     .iter()
                     .flat_map(|item| {
                         self.compute_solution
+                            .borrow()
                             .as_ref()
                             .unwrap()
                             .calculate_location_position_to_2d(item)
@@ -1244,17 +1189,11 @@ where
                     },
                 );
             });
-        vec![
-            axis_cache,
-            draw_cache,
-            vanishing_lines_cache,
-            draw_lines_cache,
-            draw,
-        ]
+        vec![axis_cache, vanishing_lines_cache, draw_lines_cache, draw]
     }
 
-    fn compute_pose(&self, state: &mut State) {
-        self.draw_cache.clear();
+    fn compute_pose(&self) {
+        self.cache.clear();
         let lines_x = [
             self.axis_data.borrow().axis_lines[0],
             self.axis_data.borrow().axis_lines[1],
@@ -1268,7 +1207,7 @@ where
             self.axis_data.borrow().axis_lines[5],
         ];
         let control_point = &self.axis_data.borrow().control_point;
-        state.compute_solution = Some(
+        self.compute_solution.borrow_mut().replace(
             compute_ui_adapter(
                 lines_x,
                 lines_y,
@@ -1308,7 +1247,7 @@ where
 
         let new_point_3d = calculate_cursor_position_to_3d(
             axis,
-            self.compute_solution.as_ref().unwrap(),
+            self.compute_solution.borrow().as_ref().unwrap(),
             self.image_size.width / self.image_size.height,
             &Vector2::new(cursor.x / bounds.width, cursor.y / bounds.height),
             last_point_3d,
@@ -1337,6 +1276,7 @@ where
             bounds.size(),
             &self
                 .compute_solution
+                .borrow()
                 .as_ref()
                 .unwrap()
                 .calculate_location_position_to_2d(&(new_point_3d + Vector3::new(3.0, 0.0, 0.0)))
@@ -1352,6 +1292,7 @@ where
             bounds.size(),
             &self
                 .compute_solution
+                .borrow()
                 .as_ref()
                 .unwrap()
                 .calculate_location_position_to_2d(&(new_point_3d + Vector3::new(-3.0, 0.0, 0.0)))
@@ -1367,6 +1308,7 @@ where
             bounds.size(),
             &self
                 .compute_solution
+                .borrow()
                 .as_ref()
                 .unwrap()
                 .calculate_location_position_to_2d(&(new_point_3d + Vector3::new(0.0, 3.0, 0.0)))
@@ -1382,6 +1324,7 @@ where
             bounds.size(),
             &self
                 .compute_solution
+                .borrow()
                 .as_ref()
                 .unwrap()
                 .calculate_location_position_to_2d(&(new_point_3d + Vector3::new(0.0, -3.0, 0.0)))
@@ -1397,6 +1340,7 @@ where
             bounds.size(),
             &self
                 .compute_solution
+                .borrow()
                 .as_ref()
                 .unwrap()
                 .calculate_location_position_to_2d(&(new_point_3d + Vector3::new(0.0, 0.0, 3.0)))
@@ -1412,6 +1356,7 @@ where
             bounds.size(),
             &self
                 .compute_solution
+                .borrow()
                 .as_ref()
                 .unwrap()
                 .calculate_location_position_to_2d(&(new_point_3d + Vector3::new(0.0, 0.0, -3.0)))
@@ -1435,7 +1380,7 @@ where
 }
 
 impl<'a, Message, Theme, Renderer> Widget<Message, Theme, Renderer>
-    for ComputeCameraPoseAll<'a, Message, Theme, Renderer>
+    for ComputeCameraPoseAll<Message, Theme, Renderer>
 where
     Renderer: geometry::Renderer,
 {
@@ -1540,13 +1485,12 @@ pub struct State {
     pub image_path: String,
     pub edit_state: Edit,
     pub points: RefCell<Vec<Point>>,
-    pub compute_solution: Option<ComputeSolution<f32>>,
     pub captured: Option<Vector>,
     pub captured_delta: f32,
     pub vanishing_points: RefCell<(Vector2<f32>, Vector2<f32>, Vector2<f32>)>,
 }
 
-impl<'a, Message, Theme, Renderer> From<ComputeCameraPoseAll<'a, Message, Theme, Renderer>>
+impl<'a, Message, Theme, Renderer> From<ComputeCameraPoseAll<Message, Theme, Renderer>>
     for Element<'a, Message, Theme, Renderer>
 where
     Message: 'a,
@@ -1554,7 +1498,7 @@ where
     Renderer: 'a + geometry::Renderer,
 {
     fn from(
-        axis_decoration: ComputeCameraPoseAll<'a, Message, Theme, Renderer>,
+        axis_decoration: ComputeCameraPoseAll<Message, Theme, Renderer>,
     ) -> Element<'a, Message, Theme, Renderer> {
         Element::new(axis_decoration)
     }
