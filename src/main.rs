@@ -10,7 +10,7 @@ use iced::widget::{
 };
 use iced::{Element, Length, Point, Size, Task, Theme};
 use nalgebra::{Vector2, Vector3};
-use perspective::camera_pose::ComputeCameraPose;
+use perspective::camera_pose_all::ComputeCameraPoseAll;
 use perspective::compute::data::ComputeSolution;
 use perspective::compute::{
     Lines, StoreLine, StorePoint, StorePoint3d, compute_camera_pose_scale, compute_ui_adapter,
@@ -479,10 +479,14 @@ impl Perspective {
             return center(text("Loading...").width(Fill).align_x(Center).size(50)).into();
         };
         let component: Element<Message> = match self.mode {
-            UiMod::Pose => ComputeCameraPose::new(
+            UiMod::Pose => ComputeCameraPoseAll::new(
                 Rc::clone(axis_data),
                 Rc::clone(&self.draw_lines),
                 &self.compute_solution,
+                Rc::clone(&self.custom_origin_translation),
+                Rc::clone(&self.custom_scale_segment),
+                Rc::clone(&self.custom_scale),
+                Rc::clone(&self.custom_error),
             )
             .image_size(self.image_size)
             .width(Length::Fill)
@@ -684,6 +688,16 @@ impl Perspective {
                     buttons.push(
                         mouse_area(container("Save lines").width(Length::Fill))
                             .on_press(Message::Save)
+                            .into(),
+                    );
+                    buttons.push(
+                        mouse_area(container("Apply Translation").width(Length::Fill))
+                            .on_press(Message::ApplyTranslation)
+                            .into(),
+                    );
+                    buttons.push(
+                        mouse_area(container("Apply Scale").width(Length::Fill))
+                            .on_press(Message::ApplyScale)
                             .into(),
                     );
                     buttons.push(

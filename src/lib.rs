@@ -1,4 +1,5 @@
 pub mod camera_pose;
+pub mod camera_pose_all;
 pub mod compute;
 pub mod decoder;
 pub mod draw;
