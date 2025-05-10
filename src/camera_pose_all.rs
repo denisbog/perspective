@@ -36,7 +36,7 @@ use crate::{
 #[derive(Debug, Clone)]
 enum CameraPoseMessage {
     EditEndpoint { cursor: Point },
-    HighlightLine { highlight: Option<usize> },
+    HighlightAxisLine { highlight: Option<usize> },
     Editline { component: Option<Component> },
     MoveControlPoint { cursor: Point },
 }
@@ -118,14 +118,15 @@ where
 
     fn handle_internal_event(&mut self, state: &mut State, message: CameraPoseMessage) {
         match message {
-            CameraPoseMessage::HighlightLine { highlight } => {
-                state.highlight = highlight;
+            CameraPoseMessage::HighlightAxisLine { highlight } => {
+                state.highlight_axis_line = highlight;
                 self.cache.clear();
+                self.axis_cache.clear();
             }
             CameraPoseMessage::Editline { component } => {
-                if component.is_some() {
-                } else {
+                if component.is_none() {
                     self.cache.clear();
+                    self.axis_cache.clear();
                 }
                 state.edit = component;
             }
@@ -133,15 +134,18 @@ where
                 if let Some(component_to_edit) = &state.edit {
                     match component_to_edit {
                         Component::A => {
-                            self.axis_data.borrow_mut().axis_lines[state.highlight.unwrap()].0 =
-                                cursor;
+                            self.axis_data.borrow_mut().axis_lines
+                                [state.highlight_axis_line.unwrap()]
+                            .0 = cursor;
                         }
                         Component::B => {
-                            self.axis_data.borrow_mut().axis_lines[state.highlight.unwrap()].1 =
-                                cursor;
+                            self.axis_data.borrow_mut().axis_lines
+                                [state.highlight_axis_line.unwrap()]
+                            .1 = cursor;
                         }
                     };
                     self.cache.clear();
+                    self.axis_cache.clear();
                     self.vanishing_lines_cache.clear();
                     self.draw_lines_cache.clear();
                     self.compute_pose();
@@ -186,6 +190,7 @@ where
                         (Status::Captured, None)
                     }
                     "f" => {
+                        self.vanishing_lines_cache.clear();
                         if let Edit::Draw = state.edit_state {
                             state.edit_state = Edit::None;
                         } else {
@@ -347,7 +352,7 @@ where
                             cursor: scale_cursor + vector_for_delta * state.captured_delta,
                         }),
                     ),
-                    Edit::Extrude(_) => (Status::Captured, None),
+                    Edit::Extrude(_) | Edit::Scale(_) => (Status::Captured, None),
                     _ => (Status::Ignored, None),
                 }
             }
@@ -366,14 +371,16 @@ where
                     Edit::ControlPoint(_) => {
                         state.edit_state = Edit::None;
                         self.cache.clear();
+                        self.axis_cache.clear();
                         (Status::Ignored, None)
                     }
                     Edit::VanishingPoint(_) => {
                         state.edit_state = Edit::None;
                         state.edit = None;
                         state.captured = None;
-                        state.highlight = None;
+                        state.highlight_axis_line = None;
                         self.cache.clear();
+                        self.axis_cache.clear();
                         (Status::Ignored, None)
                     }
                     Edit::Draw => {
@@ -414,7 +421,7 @@ where
                                 Status::Ignored,
                                 Some(CameraPoseMessage::Editline { component: None }),
                             )
-                        } else if let Some(line_index) = state.highlight {
+                        } else if let Some(line_index) = state.highlight_axis_line {
                             let (p1, p2) = self.axis_data.borrow_mut().axis_lines[line_index];
                             if should_edit_point(clicked_position, p1) {
                                 state.captured = Some(Vector::new(p1.x, p1.y));
@@ -443,7 +450,7 @@ where
                                 state.captured_delta = 0.0;
                                 (
                                     Status::Captured,
-                                    Some(CameraPoseMessage::HighlightLine { highlight: None }),
+                                    Some(CameraPoseMessage::HighlightAxisLine { highlight: None }),
                                 )
                             }
                         } else {
@@ -502,56 +509,67 @@ where
             }
 
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Right)) => {
-                if check_if_control_point_is_clicked(
-                    self.axis_data.borrow().control_point,
-                    scale_cursor,
-                ) {
-                    state.captured = Some(Vector::new(
-                        self.axis_data.borrow().control_point.x,
-                        self.axis_data.borrow().control_point.y,
-                    ));
-                    state.edit_state = Edit::ControlPoint(EditAxis::None);
-                    self.cache.clear();
-                    return (Status::Captured, None);
-                } else {
-                    for (index, (p1, p2)) in self.axis_data.borrow().axis_lines.iter().enumerate() {
-                        if check_if_point_is_from_line(p1, p2, scale_cursor) {
-                            return (
-                                Status::Captured,
-                                Some(CameraPoseMessage::HighlightLine {
-                                    highlight: Some(index),
-                                }),
-                            );
+                match state.edit_state {
+                    Edit::None | Edit::VanishingPoint(_) => {
+                        if check_if_control_point_is_clicked(
+                            self.axis_data.borrow().control_point,
+                            scale_cursor,
+                        ) {
+                            state.captured = Some(Vector::new(
+                                self.axis_data.borrow().control_point.x,
+                                self.axis_data.borrow().control_point.y,
+                            ));
+                            state.edit_state = Edit::ControlPoint(EditAxis::None);
+                            self.cache.clear();
+                            return (Status::Captured, None);
+                        } else {
+                            for (index, (p1, p2)) in
+                                self.axis_data.borrow().axis_lines.iter().enumerate()
+                            {
+                                if check_if_point_is_from_line(p1, p2, scale_cursor) {
+                                    return (
+                                        Status::Captured,
+                                        Some(CameraPoseMessage::HighlightAxisLine {
+                                            highlight: Some(index),
+                                        }),
+                                    );
+                                };
+                            }
+                        }
+                        let is_captured = if state.highlight_axis_line.is_some() {
+                            Status::Captured
+                        } else {
+                            Status::Ignored
                         };
+                        (
+                            is_captured,
+                            Some(CameraPoseMessage::HighlightAxisLine { highlight: None }),
+                        )
                     }
+                    _ => (Status::Ignored, None),
                 }
-
-                let is_captured = if state.highlight.is_some() {
-                    Status::Captured
-                } else {
-                    Status::Ignored
-                };
-                state.edit_state = Edit::None;
-                (
-                    is_captured,
-                    Some(CameraPoseMessage::HighlightLine { highlight: None }),
-                )
             }
             Event::Mouse(mouse::Event::CursorMoved { position: _ }) => {
                 state.captured_delta = 0.0;
                 match &state.edit_state {
-                    Edit::ControlPoint(_) => (
-                        Status::Captured,
-                        Some(CameraPoseMessage::MoveControlPoint {
-                            cursor: scale_cursor,
-                        }),
-                    ),
-                    Edit::VanishingPoint(_) => (
-                        Status::Captured,
-                        Some(CameraPoseMessage::EditEndpoint {
-                            cursor: scale_cursor,
-                        }),
-                    ),
+                    Edit::ControlPoint(_) => {
+                        self.axis_cache.clear();
+                        (
+                            Status::Captured,
+                            Some(CameraPoseMessage::MoveControlPoint {
+                                cursor: scale_cursor,
+                            }),
+                        )
+                    }
+                    Edit::VanishingPoint(_) => {
+                        self.axis_cache.clear();
+                        (
+                            Status::Captured,
+                            Some(CameraPoseMessage::EditEndpoint {
+                                cursor: scale_cursor,
+                            }),
+                        )
+                    }
                     Edit::VanishingLines(_) => {
                         self.vanishing_lines_cache.clear();
                         (Status::Captured, None)
@@ -584,55 +602,71 @@ where
         let color_green = Color::from_rgba(0.2, 0.8, 0.2, 0.8);
         let color_blue = Color::from_rgba(0.2, 0.2, 0.8, 0.8);
         let draw = self.cache.draw(renderer, bounds.size(), |frame| {
-            let selected_color = match &state.edit_state {
-                Edit::MarkError(_) => Color::from_rgba(0.8, 0.2, 0.2, 0.8),
-                Edit::ControlPoint(_) => Color::from_rgba(0.8, 0.8, 0.2, 0.8),
-                Edit::Draw => Color::from_rgba(0.8, 0.8, 0.2, 0.8),
-                Edit::Extrude(_) => Color::from_rgba(0.8, 0.8, 0.8, 0.8),
-                Edit::Scale(_) => Color::from_rgba(0.2, 0.8, 0.2, 0.8),
-                Edit::None => Color::from_rgba(0.8, 0.8, 0.2, 0.8),
-                _ => Color::from_rgba(0.8, 0.8, 0.2, 0.8),
-            };
-
-            if let Some(item) = state.points.borrow().get(state.selected) {
-                let mut builder = canvas::path::Builder::new();
-                builder.circle(*item, 5.0);
-                let path = builder.build();
-                frame.stroke(
-                    &path,
-                    Stroke {
-                        style: canvas::Style::Solid(selected_color),
-                        width: 2.0,
-                        ..Stroke::default()
-                    },
-                );
-            };
-            if let Some(custom_scale_segment) = self.custom_scale_segment.borrow().as_ref() {
-                let mut builder = canvas::path::Builder::new();
-                state
-                    .points
-                    .borrow()
-                    .windows(2)
-                    .enumerate()
-                    .filter(|(index, _items)| index == custom_scale_segment)
-                    .for_each(|(_index, items)| {
-                        let start = items[0];
-                        let end = items[1];
-                        builder.move_to(start);
-                        builder.line_to(end);
-                    });
-                let path = builder.build();
-                frame.stroke(
-                    &path,
-                    Stroke {
-                        style: canvas::Style::Solid(Color::from_rgba(0.8, 0.8, 0.2, 0.8)),
-                        width: 2.0,
-                        ..Stroke::default()
-                    },
-                );
-            }
+            *state.points.borrow_mut() = self
+                .draw_lines
+                .borrow()
+                .iter()
+                .flat_map(|item| {
+                    self.compute_solution
+                        .borrow()
+                        .as_ref()
+                        .unwrap()
+                        .calculate_location_position_to_2d(item)
+                })
+                .map(|item| to_canvas(bounds.size(), &item))
+                .map(|item| Point::new(item.x, item.y))
+                .collect();
 
             if let Edit::Draw = state.edit_state {
+                let selected_color = match &state.edit_state {
+                    Edit::MarkError(_) => Color::from_rgba(0.8, 0.2, 0.2, 0.8),
+                    Edit::ControlPoint(_) => Color::from_rgba(0.8, 0.8, 0.2, 0.8),
+                    Edit::Draw => Color::from_rgba(0.8, 0.8, 0.2, 0.8),
+                    Edit::Extrude(_) => Color::from_rgba(0.8, 0.8, 0.8, 0.8),
+                    Edit::Scale(_) => Color::from_rgba(0.2, 0.8, 0.2, 0.8),
+                    Edit::None => Color::from_rgba(0.8, 0.8, 0.2, 0.8),
+                    _ => Color::from_rgba(0.8, 0.8, 0.2, 0.8),
+                };
+                if let Some(item) = state.points.borrow().get(state.selected) {
+                    let mut builder = canvas::path::Builder::new();
+                    builder.circle(*item, 5.0);
+                    let path = builder.build();
+                    frame.stroke(
+                        &path,
+                        Stroke {
+                            style: canvas::Style::Solid(selected_color),
+                            width: 2.0,
+                            ..Stroke::default()
+                        },
+                    );
+                };
+
+                if let Some(custom_scale_segment) = self.custom_scale_segment.borrow().as_ref() {
+                    state
+                        .points
+                        .borrow()
+                        .windows(2)
+                        .enumerate()
+                        .filter(|(index, _items)| index == custom_scale_segment)
+                        .for_each(|(_index, items)| {
+                            let mut builder = canvas::path::Builder::new();
+                            let start = items[0];
+                            let end = items[1];
+                            builder.move_to(start);
+                            builder.line_to(end);
+                            let path = builder.build();
+                            frame.stroke(
+                                &path,
+                                Stroke {
+                                    style: canvas::Style::Solid(Color::from_rgba(
+                                        0.8, 0.8, 0.2, 0.8,
+                                    )),
+                                    width: 2.0,
+                                    ..Stroke::default()
+                                },
+                            );
+                        });
+                }
                 if let Some(scale) = self.custom_scale.borrow().as_ref() {
                     let start = to_canvas(
                         bounds.size(),
@@ -706,165 +740,11 @@ where
                     );
                 }
             }
-            if let Some(highlight) = state.highlight {
-                let mut builder = canvas::path::Builder::new();
-
-                let (p1, p2) = self.axis_data.borrow().axis_lines[highlight];
-                let p1 = scale_point_to_canvas(&Point::new(p1.x, p1.y), bounds.size());
-                let p2 = scale_point_to_canvas(&Point::new(p2.x, p2.y), bounds.size());
-                builder.move_to(p1);
-                builder.line_to(p2);
-
-                builder.circle(p1, 5f32);
-                builder.circle(p2, 5f32);
-
-                let path = builder.build();
-                frame.stroke(
-                    &path,
-                    Stroke {
-                        style: canvas::Style::Solid(Color::from_rgba(1.0, 0.0, 0.0, 0.8)),
-                        width: 2.0,
-                        ..Stroke::default()
-                    },
-                );
-
-                if let Some(points) = get_extension_for_line_within_bounds(&(p1, p2), bounds.size())
-                {
-                    let mut builder = canvas::path::Builder::new();
-                    for (index, point) in points.into_iter().enumerate() {
-                        match index {
-                            0 => builder.move_to(point),
-                            _ => builder.line_to(point),
-                        }
-                    }
-                    let path = builder.build();
-                    frame.stroke(
-                        &path,
-                        Stroke {
-                            style: canvas::Style::Solid(Color::from_rgba(1.0, 1.0, 0.9, 0.7)),
-                            width: 1.0,
-                            ..Stroke::default()
-                        },
-                    );
-                };
-                // get new points for the line
-            }
-
-            let mut builder = canvas::path::Builder::new();
-            let axis_lines = &self.axis_data.borrow().axis_lines;
-            if state.highlight.is_none() {
-                let (p1, p2) = axis_lines[0];
-                let p1 = scale_point_to_canvas(&Point::new(p1.x, p1.y), bounds.size());
-                let p2 = scale_point_to_canvas(&Point::new(p2.x, p2.y), bounds.size());
-                builder.move_to(p1);
-                builder.line_to(p2);
-                let path = builder.build();
-                frame.stroke(
-                    &path,
-                    Stroke {
-                        style: canvas::Style::Solid(color_red),
-                        width: 2.0,
-                        line_dash: LineDash {
-                            segments: &[8.0, 6.0],
-                            offset: 0,
-                        },
-                        ..Stroke::default()
-                    },
-                );
-
-                builder = canvas::path::Builder::new();
-                let (p1, p2) = axis_lines[1];
-                let p1 = scale_point_to_canvas(&Point::new(p1.x, p1.y), bounds.size());
-                let p2 = scale_point_to_canvas(&Point::new(p2.x, p2.y), bounds.size());
-                builder.move_to(p1);
-                builder.line_to(p2);
-
-                let path = builder.build();
-                frame.stroke(
-                    &path,
-                    Stroke {
-                        style: canvas::Style::Solid(color_red),
-                        width: 2.0,
-                        ..Stroke::default()
-                    },
-                );
-
-                builder = canvas::path::Builder::new();
-                let (p1, p2) = axis_lines[2];
-                let p1 = scale_point_to_canvas(&Point::new(p1.x, p1.y), bounds.size());
-                let p2 = scale_point_to_canvas(&Point::new(p2.x, p2.y), bounds.size());
-                builder.move_to(p1);
-                builder.line_to(p2);
-                let (p1, p2) = axis_lines[3];
-                let p1 = scale_point_to_canvas(&Point::new(p1.x, p1.y), bounds.size());
-                let p2 = scale_point_to_canvas(&Point::new(p2.x, p2.y), bounds.size());
-                builder.move_to(p1);
-                builder.line_to(p2);
-
-                let path = builder.build();
-                frame.stroke(
-                    &path,
-                    Stroke {
-                        style: canvas::Style::Solid(color_green),
-                        width: 2.0,
-                        ..Stroke::default()
-                    },
-                );
-                builder = canvas::path::Builder::new();
-                let (p1, p2) = axis_lines[4];
-                let p1 = scale_point_to_canvas(&Point::new(p1.x, p1.y), bounds.size());
-                let p2 = scale_point_to_canvas(&Point::new(p2.x, p2.y), bounds.size());
-                builder.move_to(p1);
-                builder.line_to(p2);
-                let (p1, p2) = axis_lines[5];
-                let p1 = scale_point_to_canvas(&Point::new(p1.x, p1.y), bounds.size());
-                let p2 = scale_point_to_canvas(&Point::new(p2.x, p2.y), bounds.size());
-                builder.move_to(p1);
-                builder.line_to(p2);
-
-                let path = builder.build();
-                frame.stroke(
-                    &path,
-                    Stroke {
-                        style: canvas::Style::Solid(color_blue),
-                        width: 2.0,
-                        ..Stroke::default()
-                    },
-                );
-                builder = canvas::path::Builder::new();
-            } else {
-                for (index, (p1, p2)) in axis_lines.iter().enumerate() {
-                    if state.highlight.is_none() || index != state.highlight.unwrap() {
-                        let p1 = scale_point_to_canvas(&Point::new(p1.x, p1.y), bounds.size());
-                        let p2 = scale_point_to_canvas(&Point::new(p2.x, p2.y), bounds.size());
-                        builder.move_to(p1);
-                        builder.line_to(p2);
-                    }
-                }
-            }
-
-            let path = builder.build();
-            frame.stroke(
-                &path,
-                Stroke {
-                    style: canvas::Style::Solid(Color::BLACK),
-                    width: 1.0,
-                    ..Stroke::default()
-                },
-            );
-
-            state.vanishing_points.replace(draw_vanishing_points(
-                &self.axis_data.borrow().control_point,
-                &self.axis_data.borrow().axis_lines,
-                &state.edit_state,
-                bounds,
-                frame,
-            ));
 
             match state.edit_state {
                 Edit::ControlPoint(_) | Edit::VanishingPoint(_) => {
                     if let Some(point) = state.captured {
-                        builder = canvas::path::Builder::new();
+                        let mut builder = canvas::path::Builder::new();
                         builder.circle(
                             scale_point_to_canvas(&Point::new(point.x, point.y), bounds.size()),
                             5.0,
@@ -970,6 +850,162 @@ where
         });
 
         let axis_cache = self.axis_cache.draw(renderer, bounds.size(), |frame| {
+            state.vanishing_points.replace(draw_vanishing_points(
+                &self.axis_data.borrow().control_point,
+                &self.axis_data.borrow().axis_lines,
+                &state.edit_state,
+                bounds,
+                frame,
+            ));
+            if let Some(highlight) = state.highlight_axis_line {
+                let mut builder = canvas::path::Builder::new();
+
+                let (p1, p2) = self.axis_data.borrow().axis_lines[highlight];
+                let p1 = scale_point_to_canvas(&Point::new(p1.x, p1.y), bounds.size());
+                let p2 = scale_point_to_canvas(&Point::new(p2.x, p2.y), bounds.size());
+                builder.move_to(p1);
+                builder.line_to(p2);
+
+                builder.circle(p1, 5f32);
+                builder.circle(p2, 5f32);
+
+                let path = builder.build();
+                frame.stroke(
+                    &path,
+                    Stroke {
+                        style: canvas::Style::Solid(Color::from_rgba(1.0, 0.0, 0.0, 0.8)),
+                        width: 2.0,
+                        ..Stroke::default()
+                    },
+                );
+
+                if let Some(points) = get_extension_for_line_within_bounds(&(p1, p2), bounds.size())
+                {
+                    let mut builder = canvas::path::Builder::new();
+                    for (index, point) in points.into_iter().enumerate() {
+                        match index {
+                            0 => builder.move_to(point),
+                            _ => builder.line_to(point),
+                        }
+                    }
+                    let path = builder.build();
+                    frame.stroke(
+                        &path,
+                        Stroke {
+                            style: canvas::Style::Solid(Color::from_rgba(1.0, 1.0, 0.9, 0.7)),
+                            width: 1.0,
+                            ..Stroke::default()
+                        },
+                    );
+                };
+                // get new points for the line
+            } else {
+                let mut builder = canvas::path::Builder::new();
+                let axis_lines = &self.axis_data.borrow().axis_lines;
+                if state.highlight_axis_line.is_none() {
+                    let (p1, p2) = axis_lines[0];
+                    let p1 = scale_point_to_canvas(&Point::new(p1.x, p1.y), bounds.size());
+                    let p2 = scale_point_to_canvas(&Point::new(p2.x, p2.y), bounds.size());
+                    builder.move_to(p1);
+                    builder.line_to(p2);
+                    let path = builder.build();
+                    frame.stroke(
+                        &path,
+                        Stroke {
+                            style: canvas::Style::Solid(color_red),
+                            width: 2.0,
+                            line_dash: LineDash {
+                                segments: &[8.0, 6.0],
+                                offset: 0,
+                            },
+                            ..Stroke::default()
+                        },
+                    );
+
+                    builder = canvas::path::Builder::new();
+                    let (p1, p2) = axis_lines[1];
+                    let p1 = scale_point_to_canvas(&Point::new(p1.x, p1.y), bounds.size());
+                    let p2 = scale_point_to_canvas(&Point::new(p2.x, p2.y), bounds.size());
+                    builder.move_to(p1);
+                    builder.line_to(p2);
+
+                    let path = builder.build();
+                    frame.stroke(
+                        &path,
+                        Stroke {
+                            style: canvas::Style::Solid(color_red),
+                            width: 2.0,
+                            ..Stroke::default()
+                        },
+                    );
+
+                    builder = canvas::path::Builder::new();
+                    let (p1, p2) = axis_lines[2];
+                    let p1 = scale_point_to_canvas(&Point::new(p1.x, p1.y), bounds.size());
+                    let p2 = scale_point_to_canvas(&Point::new(p2.x, p2.y), bounds.size());
+                    builder.move_to(p1);
+                    builder.line_to(p2);
+                    let (p1, p2) = axis_lines[3];
+                    let p1 = scale_point_to_canvas(&Point::new(p1.x, p1.y), bounds.size());
+                    let p2 = scale_point_to_canvas(&Point::new(p2.x, p2.y), bounds.size());
+                    builder.move_to(p1);
+                    builder.line_to(p2);
+
+                    let path = builder.build();
+                    frame.stroke(
+                        &path,
+                        Stroke {
+                            style: canvas::Style::Solid(color_green),
+                            width: 2.0,
+                            ..Stroke::default()
+                        },
+                    );
+                    builder = canvas::path::Builder::new();
+                    let (p1, p2) = axis_lines[4];
+                    let p1 = scale_point_to_canvas(&Point::new(p1.x, p1.y), bounds.size());
+                    let p2 = scale_point_to_canvas(&Point::new(p2.x, p2.y), bounds.size());
+                    builder.move_to(p1);
+                    builder.line_to(p2);
+                    let (p1, p2) = axis_lines[5];
+                    let p1 = scale_point_to_canvas(&Point::new(p1.x, p1.y), bounds.size());
+                    let p2 = scale_point_to_canvas(&Point::new(p2.x, p2.y), bounds.size());
+                    builder.move_to(p1);
+                    builder.line_to(p2);
+
+                    let path = builder.build();
+                    frame.stroke(
+                        &path,
+                        Stroke {
+                            style: canvas::Style::Solid(color_blue),
+                            width: 2.0,
+                            ..Stroke::default()
+                        },
+                    );
+                    builder = canvas::path::Builder::new();
+                } else {
+                    for (index, (p1, p2)) in axis_lines.iter().enumerate() {
+                        if state.highlight_axis_line.is_none()
+                            || index != state.highlight_axis_line.unwrap()
+                        {
+                            let p1 = scale_point_to_canvas(&Point::new(p1.x, p1.y), bounds.size());
+                            let p2 = scale_point_to_canvas(&Point::new(p2.x, p2.y), bounds.size());
+                            builder.move_to(p1);
+                            builder.line_to(p2);
+                        }
+                    }
+                }
+
+                let path = builder.build();
+                frame.stroke(
+                    &path,
+                    Stroke {
+                        style: canvas::Style::Solid(Color::BLACK),
+                        width: 1.0,
+                        ..Stroke::default()
+                    },
+                );
+            }
+
             if let Some(compute_solution) = self.compute_solution.borrow().as_ref() {
                 let dc_to_image = Matrix3::new_nonuniform_scaling(&Vector2::new(
                     bounds.width / 2.0,
@@ -1129,21 +1165,6 @@ where
         let draw_lines_cache = self
             .draw_lines_cache
             .draw(renderer, bounds.size(), |frame| {
-                *state.points.borrow_mut() = self
-                    .draw_lines
-                    .borrow()
-                    .iter()
-                    .flat_map(|item| {
-                        self.compute_solution
-                            .borrow()
-                            .as_ref()
-                            .unwrap()
-                            .calculate_location_position_to_2d(item)
-                    })
-                    .map(|item| to_canvas(bounds.size(), &item))
-                    .map(|item| Point::new(item.x, item.y))
-                    .collect();
-
                 let mut builder = canvas::path::Builder::new();
                 state
                     .points
@@ -1189,11 +1210,16 @@ where
                     },
                 );
             });
-        vec![axis_cache, vanishing_lines_cache, draw_lines_cache, draw]
+
+        match state.edit_state {
+            Edit::None | Edit::VanishingPoint(_) | Edit::ControlPoint(_) => {
+                vec![vanishing_lines_cache, draw_lines_cache, draw, axis_cache]
+            }
+            _ => vec![vanishing_lines_cache, draw_lines_cache, draw],
+        }
     }
 
     fn compute_pose(&self) {
-        self.cache.clear();
         let lines_x = [
             self.axis_data.borrow().axis_lines[0],
             self.axis_data.borrow().axis_lines[1],
@@ -1480,7 +1506,7 @@ where
 #[derive(Default, Clone)]
 pub struct State {
     pub selected: usize,
-    pub highlight: Option<usize>,
+    pub highlight_axis_line: Option<usize>,
     pub edit: Option<Component>,
     pub image_path: String,
     pub edit_state: Edit,
