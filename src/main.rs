@@ -58,9 +58,6 @@ pub fn main() -> iced::Result {
 enum UiMod {
     #[default]
     Pose,
-    Draw,
-    Scale,
-    Try,
 }
 
 #[derive(Debug, Clone)]
@@ -492,44 +489,6 @@ impl Perspective {
             .width(Length::Fill)
             .height(Length::Fill)
             .into(),
-            UiMod::Scale => DrawLine::new(
-                &self.compute_solution,
-                Rc::clone(&self.draw_lines),
-                Rc::clone(&self.custom_origin_translation),
-                Rc::clone(&self.custom_scale_segment),
-                Rc::clone(&self.custom_scale),
-                Rc::clone(&self.custom_error),
-            )
-            .image_size(self.image_size)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
-            UiMod::Draw => DrawLine::new(
-                &self.compute_solution,
-                Rc::clone(&self.draw_lines),
-                Rc::clone(&self.custom_origin_translation),
-                Rc::clone(&self.custom_scale_segment),
-                Rc::clone(&self.custom_scale),
-                Rc::clone(&self.custom_error),
-            )
-            .image_size(self.image_size)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
-            UiMod::Try => DrawLine::new(
-                &self.compute_solution,
-                Rc::new(RefCell::new(vec![
-                    self.custom_origin_translation.borrow().unwrap_or_default(),
-                ])),
-                Rc::clone(&self.custom_origin_translation),
-                Rc::clone(&self.custom_scale_segment),
-                Rc::clone(&self.custom_scale),
-                Rc::clone(&self.custom_error),
-            )
-            .image_size(self.image_size)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
         };
 
         let canvas = scrollable(stack!(
@@ -548,21 +507,6 @@ impl Perspective {
             match self.mode {
                 UiMod::Pose => {
                     buttons.push(
-                        mouse_area(container("Try").width(Length::Fill))
-                            .on_press(Message::ChangeMode(UiMod::Try))
-                            .into(),
-                    );
-                    buttons.push(
-                        mouse_area(container("Draw lines").width(Length::Fill))
-                            .on_press(Message::ChangeMode(UiMod::Draw))
-                            .into(),
-                    );
-                    buttons.push(
-                        mouse_area(container("Scale/Translation").width(Length::Fill))
-                            .on_press(Message::ChangeMode(UiMod::Scale))
-                            .into(),
-                    );
-                    buttons.push(
                         mouse_area(container("Perform calculations").width(Length::Fill))
                             .on_press(Message::CalculatePose)
                             .into(),
@@ -573,8 +517,23 @@ impl Perspective {
                             .into(),
                     );
                     buttons.push(
+                        mouse_area(container("Reset Translation").width(Length::Fill))
+                            .on_press(Message::ResetTranslation)
+                            .into(),
+                    );
+                    buttons.push(
                         mouse_area(container("Apply Scale").width(Length::Fill))
                             .on_press(Message::ApplyScale)
+                            .into(),
+                    );
+                    buttons.push(
+                        mouse_area(container("Apply Scale to Dimension").width(Length::Fill))
+                            .on_press(Message::ScaleToDimension)
+                            .into(),
+                    );
+                    buttons.push(
+                        mouse_area(container("Reset Scale").width(Length::Fill))
+                            .on_press(Message::ResetScale)
                             .into(),
                     );
                     buttons.push(
@@ -624,112 +583,9 @@ impl Perspective {
                             .on_press(Message::OptimizeX)
                             .into(),
                     );
-                }
-                UiMod::Scale => {
-                    buttons.push(
-                        mouse_area(container("Pose").width(Length::Fill))
-                            .on_press(Message::ChangeMode(UiMod::Pose))
-                            .into(),
-                    );
-                    buttons.push(
-                        mouse_area(container("Draw lines").width(Length::Fill))
-                            .on_press(Message::ChangeMode(UiMod::Draw))
-                            .into(),
-                    );
-                    //if self.custom_scale.borrow().is_some() {
-                    buttons.push(
-                        mouse_area(container("Apply Scale").width(Length::Fill))
-                            .on_press(Message::ApplyScale)
-                            .into(),
-                    );
-                    buttons.push(
-                        mouse_area(container("Apply Scale to Dimension").width(Length::Fill))
-                            .on_press(Message::ScaleToDimension)
-                            .into(),
-                    );
-                    //} else {
-                    buttons.push(
-                        mouse_area(container("Reset Scale").width(Length::Fill))
-                            .on_press(Message::ResetScale)
-                            .into(),
-                    );
-                    //}
-
-                    //if self.custom_origin_translation.borrow().is_some() {
-                    buttons.push(
-                        mouse_area(container("Apply Translation").width(Length::Fill))
-                            .on_press(Message::ApplyTranslation)
-                            .into(),
-                    );
-                    //} else {
-                    buttons.push(
-                        mouse_area(container("Reset Translation").width(Length::Fill))
-                            .on_press(Message::ResetTranslation)
-                            .into(),
-                    );
-                    //}
-                    buttons.push(
-                        mouse_area(container("Export Pose To FSpy").width(Length::Fill))
-                            .on_press(Message::ExportToFSpy)
-                            .into(),
-                    );
-                    buttons.push(
-                        mouse_area(container("Save lines").width(Length::Fill))
-                            .on_press(Message::Save)
-                            .into(),
-                    );
-                    buttons.push(
-                        mouse_area(container("Load lines").width(Length::Fill))
-                            .on_press(Message::LoadLines)
-                            .into(),
-                    );
-                }
-                UiMod::Draw => {
-                    buttons.push(
-                        mouse_area(container("Pose").width(Length::Fill))
-                            .on_press(Message::ChangeMode(UiMod::Pose))
-                            .into(),
-                    );
-                    buttons.push(
-                        mouse_area(container("Scale/Translation").width(Length::Fill))
-                            .on_press(Message::ChangeMode(UiMod::Scale))
-                            .into(),
-                    );
-                    buttons.push(
-                        mouse_area(container("Save lines").width(Length::Fill))
-                            .on_press(Message::Save)
-                            .into(),
-                    );
-                    buttons.push(
-                        mouse_area(container("Apply Translation").width(Length::Fill))
-                            .on_press(Message::ApplyTranslation)
-                            .into(),
-                    );
-                    buttons.push(
-                        mouse_area(container("Apply Scale").width(Length::Fill))
-                            .on_press(Message::ApplyScale)
-                            .into(),
-                    );
-                    buttons.push(
-                        mouse_area(container("Load lines").width(Length::Fill))
-                            .on_press(Message::LoadLines)
-                            .into(),
-                    );
                     buttons.push(
                         mouse_area(container("Optimize Error").width(Length::Fill))
                             .on_press(Message::OptimizeForError)
-                            .into(),
-                    );
-                }
-                UiMod::Try => {
-                    buttons.push(
-                        mouse_area(container("Pose").width(Length::Fill))
-                            .on_press(Message::ChangeMode(UiMod::Pose))
-                            .into(),
-                    );
-                    buttons.push(
-                        mouse_area(container("Scale/Translation").width(Length::Fill))
-                            .on_press(Message::ChangeMode(UiMod::Scale))
                             .into(),
                     );
                 }
@@ -737,6 +593,15 @@ impl Perspective {
             column(buttons).width(300).padding(5).spacing(7).into()
         });
 
+        let focal_length = if let Some(compute_solution) = &self.compute_solution {
+            format!(
+                "Focal lenght: {:.2} degrees, {:.2} mm",
+                compute_solution.field_of_view().to_degrees(),
+                compute_solution.focal_length()
+            )
+        } else {
+            "Focal length not avaliable. Compute the solution".into()
+        };
         column!(
             row!(
                 container(canvas_with_context_menu)
@@ -745,8 +610,11 @@ impl Perspective {
                     .align_x(Horizontal::Center)
                     .align_y(Vertical::Center),
                 column!(
-                    container(slider(0.25f32..=1.0f32, self.zoom, Message::ZoomChanged).step(0.05))
-                        .padding(20),
+                    container(column!(
+                        slider(0.25f32..=1.0f32, self.zoom, Message::ZoomChanged).step(0.05),
+                        text(focal_length)
+                    ))
+                    .padding(20),
                     scrollable(
                         column(self.images.iter().enumerate().map(|(index, item)| {
                             let opacity = if index as u8 == self.selected_image {
