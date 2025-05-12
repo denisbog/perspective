@@ -152,7 +152,8 @@ impl Perspective {
             .to_str()
             .unwrap();
         let points = if args.points.is_none() {
-            format!("{}.points", image_name)
+            let parent = Path::new(&first_image).parent().unwrap().to_str().unwrap();
+            format!("{parent}/{image_name}.points")
         } else {
             args.points.unwrap()
         };
@@ -278,7 +279,12 @@ impl Perspective {
                     .unwrap()
                     .to_str()
                     .unwrap();
-                self.points_file_name = format!("{}.points", name_without_extension);
+                let parent = Path::new(&selected_image_name)
+                    .parent()
+                    .unwrap()
+                    .to_str()
+                    .unwrap();
+                self.points_file_name = format!("{parent}/{name_without_extension}.points");
                 self.export_file_name = format!("{}.fspy", name_without_extension);
 
                 self.update(extract_state(block_on(async {
