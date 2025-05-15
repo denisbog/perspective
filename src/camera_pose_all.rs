@@ -822,17 +822,6 @@ where
                     self.draw_current_location_helpers(bounds, frame, new_point_3d, new_point);
 
                     let mut builder = canvas::path::Builder::new();
-                    frame.fill_text(Text {
-                        content: format!(
-                            "{:>5.3},\n{:>5.3},\n{:>5.3}",
-                            new_point_3d.x, new_point_3d.y, new_point_3d.z
-                        ),
-                        position: Point::new(new_point.x + 8.0, new_point.y + 8.0),
-                        color,
-                        size: Pixels(12.0),
-                        ..Default::default()
-                    });
-
                     builder.move_to(Point::new(last_point.x, last_point.y));
                     builder.line_to(Point::new(new_point.x, new_point.y));
                     let path = builder.build();
@@ -844,6 +833,24 @@ where
                             ..Stroke::default()
                         },
                     );
+                    frame.fill_rectangle(
+                        Point::new(new_point.x + 2.0, new_point.y + 2.0),
+                        Size::new(150.0, 15.0),
+                        Fill {
+                            style: canvas::Style::Solid(Color::from_rgba(0.3, 0.3, 0.3, 0.9)),
+                            ..Fill::default()
+                        },
+                    );
+                    frame.fill_text(Text {
+                        content: format!(
+                            "{:>5.3}, {:>5.3}, {:>5.3}",
+                            new_point_3d.x, new_point_3d.y, new_point_3d.z
+                        ),
+                        position: Point::new(new_point.x + 15.0, new_point.y + 4.0),
+                        color,
+                        size: Pixels(10.0),
+                        ..Default::default()
+                    });
                 }
                 _ => (),
             }
@@ -1171,11 +1178,29 @@ where
                     .borrow()
                     .windows(2)
                     .enumerate()
-                    .for_each(|(index, items)| {
+                    .for_each(|(_index, items)| {
                         let start = items[0];
                         let end = items[1];
                         builder.move_to(start);
                         builder.line_to(end);
+                    });
+                let path = builder.build();
+                frame.stroke(
+                    &path,
+                    Stroke {
+                        style: canvas::Style::Solid(Color::from_rgba(0.8, 0.8, 0.8, 0.8)),
+                        width: 2.0,
+                        ..Stroke::default()
+                    },
+                );
+
+                state
+                    .points
+                    .borrow()
+                    .windows(2)
+                    .enumerate()
+                    .for_each(|(index, items)| {
+                        let end = items[1];
                         let location3d_a = *self.draw_lines.borrow().get(index).unwrap();
                         let location3d_b = *self.draw_lines.borrow().get(index + 1).unwrap();
                         let distance = (location3d_b - location3d_a).norm();
@@ -1184,7 +1209,7 @@ where
                             Point::new(end.x + 2.0, end.y + 2.0),
                             Size::new(150.0, 15.0),
                             Fill {
-                                style: canvas::Style::Solid(Color::from_rgba(0.3, 0.3, 0.3, 0.8)),
+                                style: canvas::Style::Solid(Color::from_rgba(0.3, 0.3, 0.3, 0.9)),
                                 ..Fill::default()
                             },
                         );
@@ -1199,16 +1224,6 @@ where
                             ..Default::default()
                         });
                     });
-
-                let path = builder.build();
-                frame.stroke(
-                    &path,
-                    Stroke {
-                        style: canvas::Style::Solid(Color::from_rgba(0.8, 0.8, 0.8, 0.8)),
-                        width: 2.0,
-                        ..Stroke::default()
-                    },
-                );
             });
 
         match state.edit_state {
