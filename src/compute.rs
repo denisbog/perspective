@@ -117,7 +117,9 @@ pub mod data {
             self.field_of_view
         }
         pub fn scale(&mut self, scale: T) {
-            self.view_transform *= Matrix4::new_scaling(scale);
+            *self.view_transform.index_mut((0, 3)) /= scale;
+            *self.view_transform.index_mut((1, 3)) /= scale;
+            *self.view_transform.index_mut((2, 3)) /= scale;
 
             let perspective = Perspective3::new(
                 T::from(1.0).unwrap(),
