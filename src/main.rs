@@ -1,5 +1,7 @@
 use ::image::ImageReader;
 use clap::{Parser, command};
+use cv::nalgebra::{Point3, UnitVector3};
+use cv::{FeatureWorldMatch, Projective};
 use iced::Alignment::Center;
 use iced::Length::Fill;
 use iced::alignment::{Horizontal, Vertical};
@@ -10,15 +12,21 @@ use iced::widget::{
 };
 use iced::{Element, Length, Point, Size, Task, Theme};
 use nalgebra::{Vector2, Vector3};
+use perspective::arrsac::Arrsac;
 use perspective::camera_pose_all::ComputeCameraPoseAll;
 use perspective::compute::data::ComputeSolution;
 use perspective::compute::{
     Lines, StoreLine, StorePoint, StorePoint3d, compute_camera_pose_scale, compute_ui_adapter,
     read_points_from_file, store_scene_data_to_file,
 };
-use perspective::draw::DrawLine;
-use perspective::optimize::{ortho_center_optimize, ortho_center_optimize_x, pose_optimize};
+use perspective::optimize::{
+    ortho_center_optimize, ortho_center_optimize_x, ortho_center_optimize_y, pose_optimize,
+};
+use perspective::twist::LambdaTwist;
+use perspective::utils::to_canvas;
 use perspective::{AxisData, PointInformation};
+use rand::SeedableRng;
+use rand::rngs::SmallRng;
 use std::cell::RefCell;
 use std::fmt::Debug;
 use std::fs::File;
@@ -82,6 +90,8 @@ enum Message {
     ZoomChanged(f32),
     ScaleToDimension,
     OptimizeX,
+    PoseLambdaTwist,
+    OptimizeY,
 }
 
 #[derive(Default)]
@@ -178,6 +188,9 @@ impl Perspective {
     fn update(&mut self, message: Message) {
         match message {
             Message::Save => {
+                if Path::new(&self.points_file_name).exists() {
+                    trace!("create file {}", self.points_file_name);
+                }
                 let mut file = File::create(self.points_file_name.clone()).unwrap();
                 if self.axis_data.is_none() {
                     return;
@@ -425,6 +438,32 @@ impl Perspective {
                     self.update(Message::CalculatePose);
                 };
             }
+            Message::OptimizeY => {
+                let Some(axis_data) = &self.axis_data else {
+                    return;
+                };
+                let lines = axis_data
+                    .borrow()
+                    .axis_lines
+                    .iter()
+                    .cloned()
+                    .flat_map(|(a, b)| [Vector2::new(a.x, a.y), Vector2::new(b.x, b.y)])
+                    .collect();
+                if let Ok(lines) =
+                    ortho_center_optimize_y(self.image_size.width / self.image_size.height, lines)
+                {
+                    axis_data.borrow_mut().axis_lines = lines
+                        .chunks(2)
+                        .map(|items| {
+                            (
+                                Point::new(items[0].x, items[0].y),
+                                Point::new(items[1].x, items[1].y),
+                            )
+                        })
+                        .collect();
+                    self.update(Message::CalculatePose);
+                };
+            }
             Message::OptimizeForError => {
                 let Some(axis_data) = &self.axis_data else {
                     return;
@@ -475,6 +514,90 @@ impl Perspective {
                 self.update(Message::CalculatePose);
             }
             Message::ZoomChanged(zoom) => self.zoom = zoom,
+            Message::PoseLambdaTwist => {
+                let first_3_points = self
+                    .draw_lines
+                    .borrow()
+                    .iter()
+                    .skip(1)
+                    .take(3)
+                    .cloned()
+                    .collect::<Vec<Vector3<f32>>>();
+                println!("points {:?}", first_3_points);
+
+                println!(
+                    "transform matrix: {}",
+                    self.compute_solution.as_ref().unwrap().view_transform()
+                );
+
+                let first_3_points_2d = first_3_points
+                    .iter()
+                    .map(|point| {
+                        let point =
+                            nalgebra::Point3::new(point.x as f32, point.y as f32, point.z as f32);
+                        let point = self
+                            .compute_solution
+                            .as_ref()
+                            .unwrap()
+                            .view_transform()
+                            .try_inverse()
+                            .unwrap()
+                            * point.to_homogeneous();
+
+                        println!("point {}", point);
+                        let point = nalgebra::Point3::from_homogeneous(point).unwrap();
+                        println!("point {}", point);
+                        point
+                        //
+                        //self.compute_solution
+                        //    .as_ref()
+                        //    .unwrap()
+                        //    .calculate_location_position_to_2d(point)
+                        //    .unwrap()
+                    })
+                    .map(|point| {
+                        Vector2::new(
+                            point.x as f64 / point.z as f64,
+                            point.y as f64 / point.z as f64,
+                        )
+                    })
+                    //       .map(|item| to_canvas(self.image_size, &item))
+                    //.map(|item| item.normalize())
+                    .collect::<Vec<Vector2<f64>>>();
+                println!("points: {:?}", first_3_points_2d);
+                let samples: Vec<FeatureWorldMatch> = first_3_points
+                    .iter()
+                    .zip(&first_3_points_2d)
+                    .map(|(&world, &image)| {
+                        let image = cv::nalgebra::Point2::new(image.x, image.y);
+                        let world = cv::nalgebra::Point3::new(
+                            world.x as f64,
+                            world.z as f64,
+                            world.y as f64,
+                        );
+                        let image = UnitVector3::new_normalize(image.to_homogeneous());
+                        let world = Projective::from_homogeneous(world.to_homogeneous());
+                        FeatureWorldMatch(image, world)
+                    })
+                    .collect();
+
+                use cv::Consensus;
+
+                // Estimate potential poses with P3P.
+                // Arrsac should use the fourth point to filter and find only one model from the 4 generated.
+                let mut arrsac = Arrsac::new(0.01, SmallRng::seed_from_u64(0));
+                if let Some(pose) = arrsac.model(&LambdaTwist::new(), samples.iter().cloned()) {
+                    println!("pose: {:?}", pose.0);
+                    println!(
+                        "pose: rotation: {} {} {}",
+                        pose.0.rotation.euler_angles().0.to_degrees(),
+                        pose.0.rotation.euler_angles().1.to_degrees(),
+                        pose.0.rotation.euler_angles().2.to_degrees()
+                    );
+                } else {
+                    println!("no solution found");
+                }
+            }
         }
     }
     fn view(&self) -> Element<Message> {
@@ -590,12 +713,22 @@ impl Perspective {
                             .into(),
                     );
                     buttons.push(
+                        mouse_area(container("Optimize Y axis").width(Length::Fill))
+                            .on_press(Message::OptimizeY)
+                            .into(),
+                    );
+                    buttons.push(
                         mouse_area(container("Optimize Error").width(Length::Fill))
                             .on_press(Message::OptimizeForError)
                             .into(),
                     );
                 }
             }
+            buttons.push(
+                mouse_area(container("Pose Lambda Twist").width(Length::Fill))
+                    .on_press(Message::PoseLambdaTwist)
+                    .into(),
+            );
             column(buttons).width(300).padding(5).spacing(7).into()
         });
 
@@ -709,7 +842,10 @@ mod tests {
     use std::f32::consts::PI;
 
     use anyhow::Result;
-    use nalgebra::{Matrix3, Perspective3, Point3, RowVector3, Vector2};
+    use nalgebra::{
+        IsometryMatrix3, Matrix3, Perspective3, Point3, Rotation3, RowVector3, Translation,
+        Vector2, Vector3,
+    };
     use perspective::{
         compute::{
             compute_camera_pose, compute_camera_pose_scale, find_vanishing_point_for_lines,
@@ -747,7 +883,7 @@ mod tests {
         let user_selected_origin = Vector2::new(0.66607594, 0.5972433);
 
         let axis = Matrix3::from_rows(&[
-            RowVector3::new(1.0, 0.0, 0.0),
+            RowVector3::new(-1.0, 0.0, 0.0),
             RowVector3::new(0.0, -1.0, 0.0),
             RowVector3::new(0.0, 0.0, -1.0),
         ]);
@@ -778,6 +914,17 @@ mod tests {
         )
         .await
         .unwrap();
+
+        let rot = Rotation3::from_euler_angles(
+            72.8799f64.to_radians(),
+            0.048048f64.to_radians(),
+            135.469f64.to_radians(),
+        );
+
+        let trans = Translation::from(Vector3::new(4.25837, 3.30374, 2.07094));
+        let initial_pose = IsometryMatrix3::from_parts(trans, rot);
+        println!("transform matrix: {}", initial_pose.to_matrix());
+
         Ok(())
     }
     #[tokio::test]

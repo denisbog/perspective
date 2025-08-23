@@ -941,7 +941,7 @@ where
                         &path,
                         Stroke {
                             style: canvas::Style::Solid(color_red),
-                            width: 2.0,
+                            width: 1.0,
                             ..Stroke::default()
                         },
                     );
@@ -952,12 +952,26 @@ where
                     let p2 = scale_point_to_canvas(&Point::new(p2.x, p2.y), bounds.size());
                     builder.move_to(p1);
                     builder.line_to(p2);
+                    let path = builder.build();
+                    frame.stroke(
+                        &path,
+                        Stroke {
+                            style: canvas::Style::Solid(color_green),
+                            width: 2.0,
+                            line_dash: LineDash {
+                                segments: &[8.0, 6.0],
+                                offset: 0,
+                            },
+                            ..Stroke::default()
+                        },
+                    );
+
+                    builder = canvas::path::Builder::new();
                     let (p1, p2) = axis_lines[3];
                     let p1 = scale_point_to_canvas(&Point::new(p1.x, p1.y), bounds.size());
                     let p2 = scale_point_to_canvas(&Point::new(p2.x, p2.y), bounds.size());
                     builder.move_to(p1);
                     builder.line_to(p2);
-
                     let path = builder.build();
                     frame.stroke(
                         &path,
@@ -984,7 +998,7 @@ where
                         &path,
                         Stroke {
                             style: canvas::Style::Solid(color_blue),
-                            width: 2.0,
+                            width: 1.0,
                             ..Stroke::default()
                         },
                     );
