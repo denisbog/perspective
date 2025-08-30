@@ -1,5 +1,5 @@
 use ::image::ImageReader;
-use clap::{Parser, command};
+use clap::{Args, Parser, Subcommand, command};
 use cv::nalgebra::{Point3, UnitVector3};
 use cv::{FeatureWorldMatch, Projective};
 use iced::Alignment::Center;
@@ -41,13 +41,22 @@ use anyhow::Result;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
-struct Args {
+struct Cli {
     #[arg(short, long)]
     points: Option<String>,
     #[arg(short, long)]
     dimension: Option<f32>,
+    #[command(flatten)]
+    reference: Option<ReferenceCub>,
     #[arg(short, long, value_delimiter = ' ', num_args = 1.., default_value = "perspective.jpg")]
     images: Vec<String>,
+}
+
+#[derive(Debug, Args)]
+struct ReferenceCub {
+    x: f32,
+    y: f32,
+    z: f32,
 }
 
 pub fn main() -> iced::Result {
@@ -103,6 +112,7 @@ struct Perspective {
     compute_solution: Option<ComputeSolution<f32>>,
     image_size: Size<f32>,
     draw_lines: Rc<RefCell<Vec<Vector3<f32>>>>,
+    reference_cub: Rc<RefCell<Vec<Vector3<f32>>>>,
     selected_image: u8,
     images: Vec<String>,
     mode: UiMod,
@@ -152,7 +162,7 @@ fn extract_state(state: Result<(Option<ImageData>, Size<u32>)>) -> Message {
 
 impl Perspective {
     fn new() -> (Self, Task<Message>) {
-        let args = Args::parse();
+        let args = Cli::parse();
         trace!("args {:?}", args);
         let draw_lines = Rc::new(RefCell::new(vec![Vector3::<f32>::zeros()]));
         let first_image = args.images.first().unwrap().clone();
@@ -169,9 +179,34 @@ impl Perspective {
         };
         let export_file_name = format!("{}.fspy", image_name);
         let dimension = args.dimension;
+
+        let reference_cub = if let Some(reference) = args.reference {
+            match reference {
+                ReferenceCub { x, y, z } => {
+                    let draw_lines = Rc::new(RefCell::new(vec![
+                        Vector3::<f32>::new(0.0, 0.0, 0.0),
+                        Vector3::<f32>::new(x, 0.0, 0.0),
+                        Vector3::<f32>::new(x, y, 0.0),
+                        Vector3::<f32>::new(0.0, y, 0.0),
+                        Vector3::<f32>::new(0.0, 0.0, 0.0),
+                        // z
+                        Vector3::<f32>::new(0.0, 0.0, z),
+                        Vector3::<f32>::new(x, 0.0, z),
+                        Vector3::<f32>::new(x, y, z),
+                        Vector3::<f32>::new(0.0, y, z),
+                        Vector3::<f32>::new(0.0, 0.0, z),
+                    ]));
+                    draw_lines
+                }
+            }
+        } else {
+            Rc::new(RefCell::new(vec![Vector3::<f32>::zeros()]))
+        };
+
         let init = Perspective {
             image_path: first_image.clone(),
             draw_lines,
+            reference_cub,
             images: args.images,
             export_file_name,
             points_file_name: points.clone(),
@@ -608,6 +643,7 @@ impl Perspective {
             UiMod::Pose => ComputeCameraPoseAll::new(
                 Rc::clone(axis_data),
                 Rc::clone(&self.draw_lines),
+                Rc::clone(&self.reference_cub),
                 &self.compute_solution,
                 Rc::clone(&self.custom_origin_translation),
                 Rc::clone(&self.custom_scale_segment),

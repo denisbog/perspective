@@ -74,7 +74,7 @@ where
 
         let mut content = self
             .content
-            .as_widget()
+            .as_widget_mut()
             .layout(self.tree, renderer, &limits);
 
         // Try to stay inside borders
@@ -116,6 +116,7 @@ where
                         color: Color::from_rgba(1.0, 1.0, 1.0, 0.3),
                     },
                     shadow: Shadow::default(),
+                    ..Default::default()
                 },
                 Color::from_rgba(0.5, 0.5, 0.5, 0.95),
             );
@@ -207,10 +208,11 @@ where
     fn mouse_interaction(
         &self,
         layout: Layout<'_>,
-        cursor: Cursor,
-        viewport: &Rectangle,
+        cursor: mouse::Cursor,
         renderer: &Renderer,
     ) -> mouse::Interaction {
+        let bounds = layout.bounds();
+
         self.content.as_widget().mouse_interaction(
             self.tree,
             layout
@@ -218,7 +220,7 @@ where
                 .next()
                 .expect("widget: Layout should have a content layout."),
             cursor,
-            viewport,
+            &bounds,
             renderer,
         )
     }

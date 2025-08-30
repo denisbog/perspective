@@ -18,7 +18,7 @@ where
     Message: Clone,
     Renderer: renderer::Renderer,
 {
-    underlay: Element<'a, Message, Theme, Renderer>,
+    content: Element<'a, Message, Theme, Renderer>,
     overlay: Overlay,
 }
 
@@ -28,12 +28,12 @@ where
     Message: Clone,
     Renderer: renderer::Renderer,
 {
-    pub fn new<U>(underlay: U, overlay: Overlay) -> Self
-    where
-        U: Into<Element<'a, Message, Theme, Renderer>>,
-    {
+    pub fn new(
+        content: impl Into<Element<'a, Message, Theme, Renderer>>,
+        overlay: Overlay,
+    ) -> Self {
         ContextMenu {
-            underlay: underlay.into(),
+            content: content.into(),
             overlay,
         }
     }
@@ -47,12 +47,12 @@ where
     Renderer: 'a + renderer::Renderer,
 {
     fn size(&self) -> iced::Size<Length> {
-        self.underlay.as_widget().size()
+        self.content.as_widget().size()
     }
 
-    fn layout(&self, tree: &mut Tree, renderer: &Renderer, limits: &Limits) -> Node {
-        self.underlay
-            .as_widget()
+    fn layout(&mut self, tree: &mut Tree, renderer: &Renderer, limits: &Limits) -> Node {
+        self.content
+            .as_widget_mut()
             .layout(&mut tree.children[0], renderer, limits)
     }
 
@@ -66,7 +66,7 @@ where
         cursor: Cursor,
         viewport: &Rectangle,
     ) {
-        self.underlay.as_widget().draw(
+        self.content.as_widget().draw(
             &state.children[0],
             renderer,
             theme,
@@ -86,15 +86,15 @@ where
     }
 
     fn children(&self) -> Vec<Tree> {
-        vec![Tree::new(&self.underlay), Tree::new((self.overlay)())]
+        vec![Tree::new(&self.content), Tree::new((self.overlay)())]
     }
 
     fn diff(&self, tree: &mut Tree) {
-        tree.diff_children(&[&self.underlay, &(self.overlay)()]);
+        tree.diff_children(&[&self.content, &(self.overlay)()]);
     }
 
     fn operate<'b>(
-        &'b self,
+        &'b mut self,
         state: &'b mut Tree,
         layout: Layout<'_>,
         renderer: &Renderer,
@@ -103,16 +103,19 @@ where
         let s: &mut State = state.state.downcast_mut();
 
         if s.show {
-            let content = (self.overlay)();
+            let mut content = (self.overlay)();
             content.as_widget().diff(&mut state.children[1]);
 
             content
-                .as_widget()
+                .as_widget_mut()
                 .operate(&mut state.children[1], layout, renderer, operation);
         } else {
-            self.underlay
-                .as_widget()
-                .operate(&mut state.children[0], layout, renderer, operation);
+            self.content.as_widget_mut().operate(
+                &mut state.children[0],
+                layout,
+                renderer,
+                operation,
+            );
         }
     }
 
@@ -127,7 +130,7 @@ where
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
     ) {
-        self.underlay.as_widget_mut().update(
+        self.content.as_widget_mut().update(
             &mut state.children[0],
             event,
             layout,
@@ -159,7 +162,7 @@ where
         viewport: &Rectangle,
         renderer: &Renderer,
     ) -> mouse::Interaction {
-        self.underlay.as_widget().mouse_interaction(
+        self.content.as_widget().mouse_interaction(
             &state.children[0],
             layout,
             cursor,
@@ -171,17 +174,19 @@ where
     fn overlay<'b>(
         &'b mut self,
         state: &'b mut Tree,
-        layout: Layout<'_>,
+        layout: Layout<'b>,
         renderer: &Renderer,
+        viewport: &Rectangle,
         translation: Vector,
     ) -> Option<overlay::Element<'b, Message, Theme, Renderer>> {
         let s: &mut State = state.state.downcast_mut();
 
         if !s.show {
-            return self.underlay.as_widget_mut().overlay(
+            return self.content.as_widget_mut().overlay(
                 &mut state.children[0],
                 layout,
                 renderer,
+                viewport,
                 translation,
             );
         }

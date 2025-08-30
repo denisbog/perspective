@@ -20,6 +20,7 @@ use iced::{
     widget::canvas::{self, Event, Fill, LineDash, Stroke, Text},
 };
 use nalgebra::{Matrix3, Perspective3, Point2, Vector2, Vector3};
+use tracing::info;
 
 use crate::{
     AxisData, Component, Edit, EditAxis, PointInformation,
@@ -58,6 +59,7 @@ where
     axis_data: Rc<RefCell<AxisData>>,
     image_size: Size<f32>,
     draw_lines: Rc<RefCell<Vec<Vector3<f32>>>>,
+    reference_cub: Rc<RefCell<Vec<Vector3<f32>>>>,
     vanishing_points: Rc<RefCell<Vec<(EditAxis, Point)>>>,
     custom_origin_translation: Rc<RefCell<Option<Vector3<f32>>>>,
     custom_scale_segment: Rc<RefCell<Option<usize>>>,
@@ -72,6 +74,7 @@ where
     pub fn new(
         axis_data: Rc<RefCell<AxisData>>,
         draw_lines: Rc<RefCell<Vec<Vector3<f32>>>>,
+        reference_cub: Rc<RefCell<Vec<Vector3<f32>>>>,
         compute_solution: &'a Option<ComputeSolution<f32>>,
 
         custom_origin_translation: Rc<RefCell<Option<Vector3<f32>>>>,
@@ -92,6 +95,7 @@ where
             draw_lines_cache: geometry::Cache::new(),
             vanishing_lines_cache: geometry::Cache::default(),
             draw_lines,
+            reference_cub,
             image_size: Size::default(),
             vanishing_points: Rc::new(RefCell::new(Vec::<(EditAxis, Point)>::new())),
             custom_origin_translation,
@@ -578,6 +582,7 @@ where
                         (Status::Captured, None)
                     }
                     Edit::None => (
+                        // Status::Ignored, //TODO: check to avoid requesting redraw
                         Status::Captured,
                         Some(CameraPoseMessage::EditEndpoint {
                             cursor: scale_cursor,
@@ -614,6 +619,26 @@ where
                         .calculate_location_position_to_2d(item)
                 })
                 .map(|item| to_canvas(bounds.size(), &item))
+                .map(|item| Point::new(item.x, item.y))
+                .collect();
+
+            info!("cache refresh");
+            *state.reference_cub_2d.borrow_mut() = self
+                .reference_cub
+                .borrow()
+                .iter()
+                .flat_map(|item| {
+                    self.compute_solution
+                        .borrow()
+                        .as_ref()
+                        .unwrap()
+                        .calculate_location_position_to_2d(item)
+                })
+                .map(|item| {
+                    let out = to_canvas(bounds.size(), &item);
+                    info!("convert {item} to {out}");
+                    out
+                })
                 .map(|item| Point::new(item.x, item.y))
                 .collect();
 
@@ -1203,7 +1228,7 @@ where
                     &path,
                     Stroke {
                         style: canvas::Style::Solid(Color::from_rgba(0.8, 0.8, 0.8, 0.8)),
-                        width: 2.0,
+                        width: 1.0,
                         ..Stroke::default()
                     },
                 );
@@ -1238,6 +1263,28 @@ where
                             ..Default::default()
                         });
                     });
+
+                let mut builder = canvas::path::Builder::new();
+                state
+                    .reference_cub_2d
+                    .borrow()
+                    .windows(2)
+                    .enumerate()
+                    .for_each(|(_index, items)| {
+                        let start = items[0];
+                        let end = items[1];
+                        builder.move_to(start);
+                        builder.line_to(end);
+                    });
+                let path = builder.build();
+                frame.stroke(
+                    &path,
+                    Stroke {
+                        style: canvas::Style::Solid(Color::from_rgba(0.9, 0.7, 0.7, 0.8)),
+                        width: 1.0,
+                        ..Stroke::default()
+                    },
+                );
             });
 
         match state.edit_state {
@@ -1456,7 +1503,7 @@ where
     }
 
     fn layout(
-        &self,
+        &mut self,
         _tree: &mut Tree,
         _renderer: &Renderer,
         limits: &layout::Limits,
@@ -1540,6 +1587,7 @@ pub struct State {
     pub image_path: String,
     pub edit_state: Edit,
     pub points: RefCell<Vec<Point>>,
+    pub reference_cub_2d: RefCell<Vec<Point>>,
     pub captured: Option<Vector>,
     pub captured_delta: f32,
     pub vanishing_points: RefCell<(Vector2<f32>, Vector2<f32>, Vector2<f32>)>,
