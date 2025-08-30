@@ -920,7 +920,7 @@ where
                         &path,
                         Stroke {
                             style: canvas::Style::Solid(color_red),
-                            width: 2.0,
+                            width: 1.0,
                             line_dash: LineDash {
                                 segments: &[8.0, 6.0],
                                 offset: 0,
@@ -957,7 +957,7 @@ where
                         &path,
                         Stroke {
                             style: canvas::Style::Solid(color_green),
-                            width: 2.0,
+                            width: 1.0,
                             line_dash: LineDash {
                                 segments: &[8.0, 6.0],
                                 offset: 0,
@@ -977,7 +977,7 @@ where
                         &path,
                         Stroke {
                             style: canvas::Style::Solid(color_green),
-                            width: 2.0,
+                            width: 1.0,
                             ..Stroke::default()
                         },
                     );

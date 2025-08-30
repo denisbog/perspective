@@ -188,7 +188,7 @@ impl Perspective {
     fn update(&mut self, message: Message) {
         match message {
             Message::Save => {
-                if Path::new(&self.points_file_name).exists() {
+                if !Path::new(&self.points_file_name).exists() {
                     trace!("create file {}", self.points_file_name);
                 }
                 let mut file = File::create(self.points_file_name.clone()).unwrap();
