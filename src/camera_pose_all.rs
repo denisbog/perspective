@@ -19,7 +19,7 @@ use iced::{
     mouse::ScrollDelta,
     widget::canvas::{self, Event, Fill, LineDash, Stroke, Text},
 };
-use nalgebra::{Matrix3, Perspective3, Point2, Vector2, Vector3};
+use nalgebra::{Matrix3, Perspective3, Point2, Point3, Vector2, Vector3};
 use tracing::info;
 
 use crate::{
@@ -59,7 +59,7 @@ where
     axis_data: Rc<RefCell<AxisData>>,
     image_size: Size<f32>,
     draw_lines: Rc<RefCell<Vec<Vector3<f32>>>>,
-    reference_cub: Rc<RefCell<Vec<Vector3<f32>>>>,
+    reference_cub: Rc<RefCell<Vec<Point3<f32>>>>,
     vanishing_points: Rc<RefCell<Vec<(EditAxis, Point)>>>,
     custom_origin_translation: Rc<RefCell<Option<Vector3<f32>>>>,
     custom_scale_segment: Rc<RefCell<Option<usize>>>,
@@ -74,7 +74,7 @@ where
     pub fn new(
         axis_data: Rc<RefCell<AxisData>>,
         draw_lines: Rc<RefCell<Vec<Vector3<f32>>>>,
-        reference_cub: Rc<RefCell<Vec<Vector3<f32>>>>,
+        reference_cub: Rc<RefCell<Vec<Point3<f32>>>>,
         compute_solution: &'a Option<ComputeSolution<f32>>,
 
         custom_origin_translation: Rc<RefCell<Option<Vector3<f32>>>>,
@@ -624,22 +624,18 @@ where
 
             info!("cache refresh");
             *state.reference_cub_2d.borrow_mut() = self
-                .reference_cub
+                .compute_solution
                 .borrow()
+                .as_ref()
+                .unwrap()
+                .calculate_location_position_to_2d_frustum(&self.reference_cub.as_ref().borrow())
+                .unwrap()
                 .iter()
-                .flat_map(|item| {
-                    self.compute_solution
-                        .borrow()
-                        .as_ref()
-                        .unwrap()
-                        .calculate_location_position_to_2d(item)
+                .map(|&(start, end)| {
+                    let start = to_canvas(bounds.size(), &start.coords.xy());
+                    let end = to_canvas(bounds.size(), &end.coords.xy());
+                    (Point::new(start.x, start.y), Point::new(end.x, end.y))
                 })
-                .map(|item| {
-                    let out = to_canvas(bounds.size(), &item);
-                    info!("convert {item} to {out}");
-                    out
-                })
-                .map(|item| Point::new(item.x, item.y))
                 .collect();
 
             if let Edit::Draw = state.edit_state {
@@ -1268,11 +1264,8 @@ where
                 state
                     .reference_cub_2d
                     .borrow()
-                    .windows(2)
-                    .enumerate()
-                    .for_each(|(_index, items)| {
-                        let start = items[0];
-                        let end = items[1];
+                    .iter()
+                    .for_each(|&(start, end)| {
                         builder.move_to(start);
                         builder.line_to(end);
                     });
@@ -1587,7 +1580,7 @@ pub struct State {
     pub image_path: String,
     pub edit_state: Edit,
     pub points: RefCell<Vec<Point>>,
-    pub reference_cub_2d: RefCell<Vec<Point>>,
+    pub reference_cub_2d: RefCell<Vec<(Point, Point)>>,
     pub captured: Option<Vector>,
     pub captured_delta: f32,
     pub vanishing_points: RefCell<(Vector2<f32>, Vector2<f32>, Vector2<f32>)>,

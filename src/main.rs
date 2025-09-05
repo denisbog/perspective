@@ -1,6 +1,6 @@
 use ::image::ImageReader;
 use clap::{Args, Parser, Subcommand, command};
-use cv::nalgebra::{Point3, UnitVector3};
+use cv::nalgebra::UnitVector3;
 use cv::{FeatureWorldMatch, Projective};
 use iced::Alignment::Center;
 use iced::Length::Fill;
@@ -11,7 +11,7 @@ use iced::widget::{
     center, column, container, image, mouse_area, row, scrollable, slider, stack, text,
 };
 use iced::{Element, Length, Point, Size, Task, Theme};
-use nalgebra::{Vector2, Vector3};
+use nalgebra::{Point3, Vector2, Vector3};
 use perspective::arrsac::Arrsac;
 use perspective::camera_pose_all::ComputeCameraPoseAll;
 use perspective::compute::data::ComputeSolution;
@@ -112,7 +112,7 @@ struct Perspective {
     compute_solution: Option<ComputeSolution<f32>>,
     image_size: Size<f32>,
     draw_lines: Rc<RefCell<Vec<Vector3<f32>>>>,
-    reference_cub: Rc<RefCell<Vec<Vector3<f32>>>>,
+    reference_cub: Rc<RefCell<Vec<Point3<f32>>>>,
     selected_image: u8,
     images: Vec<String>,
     mode: UiMod,
@@ -179,28 +179,27 @@ impl Perspective {
         };
         let export_file_name = format!("{}.fspy", image_name);
         let dimension = args.dimension;
-
         let reference_cub = if let Some(reference) = args.reference {
             match reference {
                 ReferenceCub { x, y, z } => {
                     let draw_lines = Rc::new(RefCell::new(vec![
-                        Vector3::<f32>::new(0.0, 0.0, 0.0),
-                        Vector3::<f32>::new(x, 0.0, 0.0),
-                        Vector3::<f32>::new(x, y, 0.0),
-                        Vector3::<f32>::new(0.0, y, 0.0),
-                        Vector3::<f32>::new(0.0, 0.0, 0.0),
+                        Point3::<f32>::new(0.0, 0.0, 0.0),
+                        Point3::<f32>::new(x, 0.0, 0.0),
+                        Point3::<f32>::new(x, y, 0.0),
+                        Point3::<f32>::new(0.0, y, 0.0),
+                        Point3::<f32>::new(0.0, 0.0, 0.0),
                         // z
-                        Vector3::<f32>::new(0.0, 0.0, z),
-                        Vector3::<f32>::new(x, 0.0, z),
-                        Vector3::<f32>::new(x, y, z),
-                        Vector3::<f32>::new(0.0, y, z),
-                        Vector3::<f32>::new(0.0, 0.0, z),
+                        Point3::<f32>::new(0.0, 0.0, z),
+                        Point3::<f32>::new(x, 0.0, z),
+                        Point3::<f32>::new(x, y, z),
+                        Point3::<f32>::new(0.0, y, z),
+                        Point3::<f32>::new(0.0, 0.0, z),
                     ]));
                     draw_lines
                 }
             }
         } else {
-            Rc::new(RefCell::new(vec![Vector3::<f32>::zeros()]))
+            Rc::new(RefCell::new(vec![Point3::<f32>::new(0.0, 0.0, 0.0)]))
         };
 
         let init = Perspective {

@@ -57,6 +57,7 @@ impl From<&(Point, Point)> for StoreLine {
 pub mod data {
     use nalgebra::{Matrix4, Perspective3, Point3, RealField, Vector2, Vector3};
     use num_traits::Float;
+    use tracing::info;
 
     #[derive(Clone)]
     pub struct ComputeSolution<T> {
@@ -94,12 +95,84 @@ pub mod data {
             }
         }
 
+        pub fn calculate_location_position_to_2d_frustum(
+            &self,
+            location3d_points: &Vec<Point3<T>>,
+        ) -> Option<Vec<(Point3<T>, Point3<T>)>> {
+            let field_of_view =
+                T::from(2.0).unwrap() * Float::atan(T::from(1.0).unwrap() / self.focal_length);
+
+            let perspective = Perspective3::new(
+                T::from(1.0).unwrap(),
+                field_of_view,
+                T::from(0.1).unwrap(),
+                T::from(1000.0).unwrap(),
+            );
+
+            let mut matrix = perspective.into_inner();
+            *matrix.index_mut((0, 2)) = -self.ortho_center.x;
+            *matrix.index_mut((1, 2)) = -self.ortho_center.y;
+
+            let frustum = crate::frustum::Frustum::from_matrix(&matrix);
+            let location3d_points = location3d_points
+                .iter()
+                .map(|item| self.view_transform * item.to_homogeneous())
+                .map(|item| Point3::from_homogeneous(item).unwrap())
+                .collect::<Vec<Point3<T>>>();
+
+            println!("Original vertices: {:?}", location3d_points);
+            let clipped_vertices = location3d_points
+                .windows(2)
+                .flat_map(|pixels| {
+                    crate::frustum::clip_line_frustum(&frustum, pixels[0].coords, pixels[1].coords)
+                })
+                .map(|items| {
+                    (
+                        matrix * Point3::new(items.0.x, items.0.y, items.0.z).to_homogeneous(),
+                        matrix * Point3::new(items.1.x, items.1.y, items.1.z).to_homogeneous(),
+                    )
+                })
+                .map(|items| {
+                    (
+                        Point3::from_homogeneous(items.0).unwrap(),
+                        Point3::from_homogeneous(items.1).unwrap(),
+                    )
+                })
+                .collect();
+
+            println!("Clipped vertices: {:?}", clipped_vertices);
+
+            Some(clipped_vertices)
+        }
+
         pub fn calculate_location_position_to_2d(
             &self,
             location3d: &Vector3<T>,
         ) -> Option<Vector2<T>> {
             let point = Point3::from(*location3d);
-            let point = self.transform * point.to_homogeneous();
+
+            let field_of_view =
+                T::from(2.0).unwrap() * Float::atan(T::from(1.0).unwrap() / self.focal_length);
+
+            let perspective = Perspective3::new(
+                T::from(1.0).unwrap(),
+                field_of_view,
+                T::from(0.1).unwrap(),
+                T::from(1000.0).unwrap(),
+            );
+
+            let mut matrix = perspective.into_inner();
+            *matrix.index_mut((0, 2)) = -self.ortho_center.x;
+            *matrix.index_mut((1, 2)) = -self.ortho_center.y;
+
+            let point = self.view_transform * point.to_homogeneous();
+            info!("point 1 : {point}");
+            info!("matrix : {matrix}");
+            let point = matrix * point;
+            info!("point 2 : {point}");
+            // let transform = matrix * self.view_transform;
+            // let point = self.transform * point.to_homogeneous();
+
             let point = Point3::from_homogeneous(point)?;
             Some(point.xy().coords)
         }
@@ -115,6 +188,9 @@ pub mod data {
         }
         pub fn field_of_view(&self) -> T {
             self.field_of_view
+        }
+        pub fn transform(&self) -> Matrix4<T> {
+            self.transform
         }
         pub fn scale(&mut self, scale: T) {
             *self.view_transform.index_mut((0, 3)) /= scale;

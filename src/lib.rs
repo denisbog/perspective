@@ -5,6 +5,7 @@ pub mod decoder;
 pub mod draw;
 pub mod draw_decoration;
 pub mod encoder;
+pub mod frustum;
 pub mod fspy;
 pub mod optimize;
 pub mod twist;
