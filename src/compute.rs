@@ -8,7 +8,8 @@ use anyhow::Result;
 use data::ComputeSolution;
 use iced::{Point, Size};
 use nalgebra::{
-    ComplexField, Matrix3, RealField, RowVector3, Scalar, SimdComplexField, Vector2, Vector3,
+    ComplexField, Matrix3, Point2, Point3, RealField, RowVector3, Scalar, SimdComplexField,
+    Vector2, Vector3,
 };
 use num_traits::Float;
 use serde::{Deserialize, Serialize};
@@ -17,7 +18,7 @@ use tokio_util::{bytes::BytesMut, codec::Encoder};
 
 use crate::{
     AxisData, FSpyData, SceneSettings, encoder::FSpyEncoder,
-    fspy::compute_solution_to_scene_settings, utils::relative_to_image_plane,
+    fspy::compute_solution_to_scene_settings, twist_point, utils::relative_to_image_plane,
 };
 
 #[derive(Serialize, Deserialize)]
@@ -33,6 +34,8 @@ pub struct Lines {
     pub flip: Option<[bool; 3]>,
     pub custom_origin_tanslation: Option<StorePoint3d>,
     pub custom_scale: Option<f32>,
+    pub twist_points: Option<Vec<StorePoint3d>>,
+    pub twist_points_2d: Option<Vec<StorePoint>>,
 }
 #[derive(Serialize, Deserialize)]
 pub struct StoreLine {
@@ -57,22 +60,18 @@ impl From<&(Point, Point)> for StoreLine {
 pub mod data {
     use nalgebra::{Matrix4, Perspective3, Point3, RealField, Vector2, Vector3};
     use num_traits::Float;
-    use tracing::info;
+    use tracing::trace;
 
     #[derive(Clone)]
     pub struct ComputeSolution<T> {
         view_transform: Matrix4<T>,
         ortho_center: Vector2<T>,
-        focal_length: T,
         field_of_view: T,
         transform: Matrix4<T>,
     }
 
     impl<T: Float + RealField> ComputeSolution<T> {
-        pub fn new(view_transform: Matrix4<T>, ortho_center: Vector2<T>, focal_length: T) -> Self {
-            let field_of_view =
-                T::from(2.0).unwrap() * Float::atan(T::from(1.0).unwrap() / focal_length);
-
+        pub fn new(view_transform: Matrix4<T>, ortho_center: Vector2<T>, field_of_view: T) -> Self {
             let perspective = Perspective3::new(
                 T::from(1.0).unwrap(),
                 field_of_view,
@@ -83,13 +82,13 @@ pub mod data {
             let mut matrix = perspective.into_inner();
             *matrix.index_mut((0, 2)) = -ortho_center.x;
             *matrix.index_mut((1, 2)) = -ortho_center.y;
-
+            trace!("perspective {matrix}");
+            trace!("field_of_view {}", field_of_view.to_degrees());
             let transform = matrix * view_transform;
 
             Self {
                 view_transform,
                 ortho_center,
-                focal_length,
                 field_of_view,
                 transform,
             }
@@ -98,13 +97,10 @@ pub mod data {
         pub fn calculate_location_position_to_2d_frustum(
             &self,
             location3d_points: &Vec<Point3<T>>,
-        ) -> Option<Vec<(Point3<T>, Point3<T>)>> {
-            let field_of_view =
-                T::from(2.0).unwrap() * Float::atan(T::from(1.0).unwrap() / self.focal_length);
-
+        ) -> Vec<(Point3<T>, Point3<T>)> {
             let perspective = Perspective3::new(
                 T::from(1.0).unwrap(),
-                field_of_view,
+                self.field_of_view,
                 T::from(0.1).unwrap(),
                 T::from(1000.0).unwrap(),
             );
@@ -120,29 +116,24 @@ pub mod data {
                 .map(|item| Point3::from_homogeneous(item).unwrap())
                 .collect::<Vec<Point3<T>>>();
 
-            println!("Original vertices: {:?}", location3d_points);
-            let clipped_vertices = location3d_points
+            location3d_points
                 .windows(2)
                 .flat_map(|pixels| {
                     crate::frustum::clip_line_frustum(&frustum, pixels[0].coords, pixels[1].coords)
                 })
-                .map(|items| {
+                .map(|(start, end)| {
                     (
-                        matrix * Point3::new(items.0.x, items.0.y, items.0.z).to_homogeneous(),
-                        matrix * Point3::new(items.1.x, items.1.y, items.1.z).to_homogeneous(),
+                        matrix * Point3::new(start.x, start.y, start.z).to_homogeneous(),
+                        matrix * Point3::new(end.x, end.y, end.z).to_homogeneous(),
                     )
                 })
-                .map(|items| {
+                .map(|(start, end)| {
                     (
-                        Point3::from_homogeneous(items.0).unwrap(),
-                        Point3::from_homogeneous(items.1).unwrap(),
+                        Point3::from_homogeneous(start).unwrap(),
+                        Point3::from_homogeneous(end).unwrap(),
                     )
                 })
-                .collect();
-
-            println!("Clipped vertices: {:?}", clipped_vertices);
-
-            Some(clipped_vertices)
+                .collect()
         }
 
         pub fn calculate_location_position_to_2d(
@@ -150,29 +141,7 @@ pub mod data {
             location3d: &Vector3<T>,
         ) -> Option<Vector2<T>> {
             let point = Point3::from(*location3d);
-
-            let field_of_view =
-                T::from(2.0).unwrap() * Float::atan(T::from(1.0).unwrap() / self.focal_length);
-
-            let perspective = Perspective3::new(
-                T::from(1.0).unwrap(),
-                field_of_view,
-                T::from(0.1).unwrap(),
-                T::from(1000.0).unwrap(),
-            );
-
-            let mut matrix = perspective.into_inner();
-            *matrix.index_mut((0, 2)) = -self.ortho_center.x;
-            *matrix.index_mut((1, 2)) = -self.ortho_center.y;
-
-            let point = self.view_transform * point.to_homogeneous();
-            info!("point 1 : {point}");
-            info!("matrix : {matrix}");
-            let point = matrix * point;
-            info!("point 2 : {point}");
-            // let transform = matrix * self.view_transform;
-            // let point = self.transform * point.to_homogeneous();
-
+            let point = self.transform * point.to_homogeneous();
             let point = Point3::from_homogeneous(point)?;
             Some(point.xy().coords)
         }
@@ -182,9 +151,6 @@ pub mod data {
         }
         pub fn ortho_center(&self) -> Vector2<T> {
             self.ortho_center
-        }
-        pub fn focal_length(&self) -> T {
-            self.focal_length
         }
         pub fn field_of_view(&self) -> T {
             self.field_of_view
@@ -231,6 +197,7 @@ pub fn read_points_from_file(points: &String) -> Result<(AxisData, Option<Vec<Ve
     let mut content = String::new();
     file.read_to_string(&mut content)?;
     let data: Lines = serde_json::from_str(&content)?;
+
     let lines = data
         .lines
         .iter()
@@ -270,7 +237,26 @@ pub fn read_points_from_file(points: &String) -> Result<(AxisData, Option<Vec<Ve
         .map(|item| Vector3::new(item.x, item.y, item.z));
 
     let custom_scale = data.custom_scale;
-
+    let twist_points = if let Some(twist_points) = data.twist_points {
+        Some(
+            twist_points
+                .iter()
+                .map(|item| Point3::new(item.x, item.y, item.z))
+                .collect(),
+        )
+    } else {
+        None
+    };
+    let twist_points_2d = if let Some(twist_points_2d) = data.twist_points_2d {
+        Some(
+            twist_points_2d
+                .iter()
+                .map(|item| Point2::new(item.x, item.y))
+                .collect(),
+        )
+    } else {
+        None
+    };
     Ok((
         AxisData {
             control_point,
@@ -278,6 +264,8 @@ pub fn read_points_from_file(points: &String) -> Result<(AxisData, Option<Vec<Ve
             flip,
             custom_origin_translation,
             custom_scale,
+            twist_points,
+            twist_points_2d,
         },
         points,
     ))
@@ -500,10 +488,11 @@ pub fn compute_camera_pose<
 
     // to ckeck in blender
     // bpy.data.objects["<name>.fspy"].matrix_world
+    let field_of_view = T::from(2.0).unwrap() * Float::atan(T::from(1.0).unwrap() / focal_length);
     Ok(ComputeSolution::new(
         view_transform,
         ortho_center,
-        focal_length,
+        field_of_view,
     ))
 }
 

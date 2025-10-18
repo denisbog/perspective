@@ -1,7 +1,5 @@
-use ::image::ImageReader;
-use clap::{Args, Parser, Subcommand, command};
-use cv::nalgebra::UnitVector3;
-use cv::{FeatureWorldMatch, Projective};
+use clap::{Args, Parser};
+use cv::FeatureWorldMatch;
 use iced::Alignment::Center;
 use iced::Length::Fill;
 use iced::alignment::{Horizontal, Vertical};
@@ -11,9 +9,7 @@ use iced::widget::{
     center, column, container, image, mouse_area, row, scrollable, slider, stack, text,
 };
 use iced::{Element, Length, Point, Size, Task, Theme};
-use nalgebra::{Point3, Vector2, Vector3};
-use perspective::arrsac::Arrsac;
-use perspective::camera_pose_all::ComputeCameraPoseAll;
+use nalgebra::{Matrix4, Point2, Point3, Vector2, Vector3};
 use perspective::compute::data::ComputeSolution;
 use perspective::compute::{
     Lines, StoreLine, StorePoint, StorePoint3d, compute_camera_pose_scale, compute_ui_adapter,
@@ -22,20 +18,20 @@ use perspective::compute::{
 use perspective::optimize::{
     ortho_center_optimize, ortho_center_optimize_x, ortho_center_optimize_y, pose_optimize,
 };
+use perspective::read_state::{ImageData, load};
 use perspective::twist::LambdaTwist;
-use perspective::utils::to_canvas;
+use perspective::twist_pose_all::ComputeCameraPoseTwist;
 use perspective::{AxisData, PointInformation};
-use rand::SeedableRng;
-use rand::rngs::SmallRng;
 use std::cell::RefCell;
 use std::fmt::Debug;
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;
 use std::rc::Rc;
-use tracing::{trace, warn};
+use tracing::{info, trace};
 use tracing_subscriber::EnvFilter;
 use zoomer::context_menu::ContextMenu;
+use zoomer::editor_component::{EditComponentMessage, EditorComponent};
 
 use anyhow::Result;
 
@@ -78,6 +74,14 @@ enum UiMod {
 }
 
 #[derive(Debug, Clone)]
+enum TwistPointEdit {
+    Point1(Point3<f32>),
+    Point2(Point3<f32>),
+    Point3(Point3<f32>),
+    None,
+}
+
+#[derive(Debug, Clone)]
 enum Message {
     Save,
     LoadLines,
@@ -101,6 +105,8 @@ enum Message {
     OptimizeX,
     PoseLambdaTwist,
     OptimizeY,
+    CalculatePoseUsingVanishingPoint,
+    Edit(TwistPointEdit),
 }
 
 #[derive(Default)]
@@ -122,34 +128,9 @@ struct Perspective {
     custom_error: Rc<RefCell<Option<PointInformation<f32>>>>,
     zoom: f32,
     dimension: Option<f32>,
-}
-#[derive(Debug, Clone)]
-struct ImageData {
-    axis_data: AxisData,
-    lines: Option<Vec<Vector3<f32>>>,
-}
-async fn load(
-    image: String,
-    points_file_name: String,
-    load_lines: bool,
-) -> Result<(Option<ImageData>, Size<u32>)> {
-    let extracted_data = if Path::new(&points_file_name).exists() {
-        let read_from_file = read_points_from_file(&points_file_name)?;
-        let lines = if load_lines { read_from_file.1 } else { None };
-        Some(ImageData {
-            axis_data: read_from_file.0,
-            lines,
-        })
-    } else {
-        warn!("could not read data for {}", points_file_name);
-        None
-    };
-
-    let decoded_image = ImageReader::open(&image)?.decode()?;
-    Ok((
-        extracted_data,
-        Size::new(decoded_image.width(), decoded_image.height()),
-    ))
+    twist_points: Rc<RefCell<Vec<Point3<f32>>>>,
+    twist_points_2d: Rc<RefCell<Vec<Point2<f32>>>>,
+    editor_component: EditorComponent,
 }
 
 fn extract_state(state: Result<(Option<ImageData>, Size<u32>)>) -> Message {
@@ -202,6 +183,19 @@ impl Perspective {
             Rc::new(RefCell::new(vec![Point3::<f32>::new(0.0, 0.0, 0.0)]))
         };
 
+        let twist_points = Rc::new(RefCell::new(vec![
+            Point3::new(7.54, 0.0, 0.0),
+            Point3::new(3.14, 0.0, 2.4),
+            Point3::new(3.57, 3.61, 0.0),
+        ]));
+
+        let twist_points_2d = Rc::new(RefCell::new(vec![
+            Point2::new(0.5, 0.5),
+            Point2::new(0.5, 0.5),
+            Point2::new(0.5, 0.5),
+        ]));
+
+        let editor_component = EditorComponent::new(twist_points.clone());
         let init = Perspective {
             image_path: first_image.clone(),
             draw_lines,
@@ -211,6 +205,9 @@ impl Perspective {
             points_file_name: points.clone(),
             zoom: 0.5,
             dimension,
+            twist_points,
+            twist_points_2d,
+            editor_component,
             ..Self::default()
         };
         (
@@ -242,6 +239,38 @@ impl Perspective {
                 };
             }
             Message::CalculatePose => {
+                info!("does nothing");
+                // let Some(axis_data) = &self.axis_data else {
+                //     return;
+                // };
+                // let lines_x = [
+                //     axis_data.borrow().axis_lines[0],
+                //     axis_data.borrow().axis_lines[1],
+                // ];
+                // let lines_y = [
+                //     axis_data.borrow().axis_lines[2],
+                //     axis_data.borrow().axis_lines[3],
+                // ];
+                // let lines_z = [
+                //     axis_data.borrow().axis_lines[4],
+                //     axis_data.borrow().axis_lines[5],
+                // ];
+                // let control_point = &axis_data.borrow().control_point;
+                // self.compute_solution = Some(
+                //     compute_ui_adapter(
+                //         lines_x,
+                //         lines_y,
+                //         lines_z,
+                //         self.image_size,
+                //         control_point,
+                //         axis_data.borrow().flip,
+                //         &axis_data.borrow().custom_origin_translation,
+                //         &axis_data.borrow().custom_scale,
+                //     )
+                //     .unwrap(),
+                // );
+            }
+            Message::CalculatePoseUsingVanishingPoint => {
                 let Some(axis_data) = &self.axis_data else {
                     return;
                 };
@@ -307,7 +336,28 @@ impl Perspective {
                 } else {
                     self.axis_data = Some(Rc::new(RefCell::new(AxisData::default())));
                 }
-                self.update(Message::CalculatePose);
+                self.twist_points = Rc::new(RefCell::new(
+                    self.axis_data
+                        .as_ref()
+                        .unwrap()
+                        .borrow()
+                        .twist_points
+                        .as_ref()
+                        .unwrap()
+                        .clone(),
+                ));
+                self.twist_points_2d = Rc::new(RefCell::new(
+                    self.axis_data
+                        .as_ref()
+                        .unwrap()
+                        .borrow()
+                        .twist_points_2d
+                        .as_ref()
+                        .unwrap()
+                        .clone(),
+                ));
+                self.editor_component = EditorComponent::new(self.twist_points.clone());
+                self.update(Message::CalculatePoseUsingVanishingPoint);
             }
             Message::ChangeMode(mode) => {
                 self.mode = mode;
@@ -344,7 +394,7 @@ impl Perspective {
                     return;
                 };
                 axis_data.borrow_mut().flip = (flip_x, flip_y, flip_z);
-                self.update(Message::CalculatePose);
+                self.update(Message::CalculatePoseUsingVanishingPoint);
             }
             Message::ApplyTranslation => {
                 let Some(custom_origin_translation) = *self.custom_origin_translation.borrow()
@@ -356,14 +406,14 @@ impl Perspective {
                     .unwrap()
                     .borrow_mut()
                     .custom_origin_translation = Some(custom_origin_translation);
-                self.update(Message::CalculatePose);
+                self.update(Message::CalculatePoseUsingVanishingPoint);
             }
             Message::ResetTranslation => {
                 let Some(axis_data) = &self.axis_data else {
                     return;
                 };
                 axis_data.borrow_mut().custom_origin_translation = None;
-                self.update(Message::CalculatePose);
+                self.update(Message::CalculatePoseUsingVanishingPoint);
             }
             Message::ApplyScale => {
                 let Some(custom_scale) = self.custom_scale.borrow().clone() else {
@@ -395,14 +445,14 @@ impl Perspective {
                 self.axis_data.as_ref().unwrap().borrow_mut().custom_scale = Some(scale);
                 self.custom_scale.replace(None);
                 self.custom_scale_segment.replace(None);
-                self.update(Message::CalculatePose);
+                self.update(Message::CalculatePoseUsingVanishingPoint);
             }
             Message::ResetScale => {
                 let Some(axis_data) = &self.axis_data else {
                     return;
                 };
                 axis_data.borrow_mut().custom_scale = None;
-                self.update(Message::CalculatePose);
+                self.update(Message::CalculatePoseUsingVanishingPoint);
             }
             Message::ExportToFSpy => {
                 let Some(compute_solution) = &self.compute_solution else {
@@ -443,7 +493,7 @@ impl Perspective {
                             )
                         })
                         .collect();
-                    self.update(Message::CalculatePose);
+                    self.update(Message::CalculatePoseUsingVanishingPoint);
                 };
             }
             Message::OptimizeX => {
@@ -469,7 +519,7 @@ impl Perspective {
                             )
                         })
                         .collect();
-                    self.update(Message::CalculatePose);
+                    self.update(Message::CalculatePoseUsingVanishingPoint);
                 };
             }
             Message::OptimizeY => {
@@ -495,7 +545,7 @@ impl Perspective {
                             )
                         })
                         .collect();
-                    self.update(Message::CalculatePose);
+                    self.update(Message::CalculatePoseUsingVanishingPoint);
                 };
             }
             Message::OptimizeForError => {
@@ -545,101 +595,132 @@ impl Perspective {
                         })
                         .collect();
                 };
-                self.update(Message::CalculatePose);
+                self.update(Message::CalculatePoseUsingVanishingPoint);
             }
             Message::ZoomChanged(zoom) => self.zoom = zoom,
             Message::PoseLambdaTwist => {
-                let first_3_points = self
-                    .draw_lines
+                let fx = self.image_size.width as f64;
+                let fy = self.image_size.height as f64;
+                let cx = self.image_size.width as f64 / 2.0;
+                let cy = self.image_size.height as f64 / 2.0;
+                let field_of_view = 101f64.to_radians();
+                let unprojection =
+                    cv::nalgebra::Perspective3::new(1.0, field_of_view, 0.1, 1000.0).inverse();
+                let to_device_coord_transform = cv::nalgebra::Matrix3::new_nonuniform_scaling(
+                    &cv::nalgebra::Vector2::new(fx / 2.0, -fx / 2.0),
+                )
+                .append_translation(&cv::nalgebra::Vector2::new(cx, cy))
+                .try_inverse()
+                .unwrap();
+                info!("3d: {:?}", self.twist_points.borrow());
+                info!("2d: {:?}", self.twist_points_2d.borrow());
+                info!(
+                    "2d: {:?}",
+                    self.twist_points_2d
+                        .borrow()
+                        .iter()
+                        .map(|item| {
+                            cv::nalgebra::Point2::new(item.x as f64 * fx, item.y as f64 * fy)
+                        })
+                        .collect::<Vec<_>>()
+                );
+                let bearings: Vec<cv::nalgebra::Point3<f64>> = self
+                    .twist_points_2d
                     .borrow()
                     .iter()
-                    .skip(1)
-                    .take(3)
-                    .cloned()
-                    .collect::<Vec<Vector3<f32>>>();
-                println!("points {:?}", first_3_points);
-
-                println!(
-                    "transform matrix: {}",
-                    self.compute_solution.as_ref().unwrap().view_transform()
-                );
-
-                let first_3_points_2d = first_3_points
-                    .iter()
-                    .map(|point| {
-                        let point =
-                            nalgebra::Point3::new(point.x as f32, point.y as f32, point.z as f32);
-                        let point = self
-                            .compute_solution
-                            .as_ref()
-                            .unwrap()
-                            .view_transform()
-                            .try_inverse()
-                            .unwrap()
-                            * point.to_homogeneous();
-
-                        println!("point {}", point);
-                        let point = nalgebra::Point3::from_homogeneous(point).unwrap();
-                        println!("point {}", point);
-                        point
-                        //
-                        //self.compute_solution
-                        //    .as_ref()
-                        //    .unwrap()
-                        //    .calculate_location_position_to_2d(point)
-                        //    .unwrap()
-                    })
-                    .map(|point| {
-                        Vector2::new(
-                            point.x as f64 / point.z as f64,
-                            point.y as f64 / point.z as f64,
+                    .map(|item| {
+                        let item =
+                            cv::nalgebra::Point2::new(item.x as f64 * fx, item.y as f64 * fy);
+                        cv::nalgebra::Point3::from(
+                            (unprojection
+                                * cv::nalgebra::Point3::from(
+                                    to_device_coord_transform * item.to_homogeneous(),
+                                )
+                                .to_homogeneous())
+                            .xyz(),
                         )
                     })
-                    //       .map(|item| to_canvas(self.image_size, &item))
-                    //.map(|item| item.normalize())
-                    .collect::<Vec<Vector2<f64>>>();
-                println!("points: {:?}", first_3_points_2d);
-                let samples: Vec<FeatureWorldMatch> = first_3_points
+                    .map(|item| item / item.z)
+                    .collect();
+                info!("bearings: {:?}", bearings);
+                let features: Vec<FeatureWorldMatch<_>> = self
+                    .twist_points
+                    .borrow()
                     .iter()
-                    .zip(&first_3_points_2d)
+                    .zip(&bearings)
                     .map(|(&world, &image)| {
-                        let image = cv::nalgebra::Point2::new(image.x, image.y);
                         let world = cv::nalgebra::Point3::new(
                             world.x as f64,
-                            world.z as f64,
                             world.y as f64,
+                            world.z as f64,
                         );
-                        let image = UnitVector3::new_normalize(image.to_homogeneous());
-                        let world = Projective::from_homogeneous(world.to_homogeneous());
-                        FeatureWorldMatch(image, world)
+                        let bearing = cv::nalgebra::Unit::new_normalize(
+                            cv::nalgebra::Vector3::new(image.x, image.y, 1.0),
+                        );
+                        FeatureWorldMatch(bearing, cv::WorldPoint(world.to_homogeneous()))
                     })
                     .collect();
 
-                use cv::Consensus;
+                let solver = LambdaTwist::new();
+                use cv::Estimator;
+                let candidates = solver.estimate(features.iter().cloned());
+                candidates
+                    .iter()
+                    .for_each(|item| info!("solution: {}", item.0.to_homogeneous()));
+                let item = candidates.iter().last().unwrap();
+                let solution = item.0.to_homogeneous();
+                info!("using the last solution {solution}");
+                self.compute_solution = Some(ComputeSolution::new(
+                    Matrix4::new(
+                        solution.m11 as f32,
+                        solution.m12 as f32,
+                        solution.m13 as f32,
+                        solution.m14 as f32,
+                        solution.m21 as f32,
+                        solution.m22 as f32,
+                        solution.m23 as f32,
+                        solution.m24 as f32,
+                        solution.m31 as f32,
+                        solution.m32 as f32,
+                        solution.m33 as f32,
+                        solution.m34 as f32,
+                        solution.m41 as f32,
+                        solution.m42 as f32,
+                        solution.m43 as f32,
+                        solution.m44 as f32,
+                    ),
+                    Vector2::new(0.0, 0.0),
+                    field_of_view as f32,
+                ));
 
-                // Estimate potential poses with P3P.
-                // Arrsac should use the fourth point to filter and find only one model from the 4 generated.
-                let mut arrsac = Arrsac::new(0.01, SmallRng::seed_from_u64(0));
-                if let Some(pose) = arrsac.model(&LambdaTwist::new(), samples.iter().cloned()) {
-                    println!("pose: {:?}", pose.0);
-                    println!(
-                        "pose: rotation: {} {} {}",
-                        pose.0.rotation.euler_angles().0.to_degrees(),
-                        pose.0.rotation.euler_angles().1.to_degrees(),
-                        pose.0.rotation.euler_angles().2.to_degrees()
-                    );
-                } else {
-                    println!("no solution found");
-                }
+                // use cv::Consensus;
+                // // Estimate potential poses with P3P.
+                // // Arrsac should use the fourth point to filter and find only one model from the 4 generated.
+                // let mut arrsac = Arrsac::new(1e-6, SmallRng::seed_from_u64(0));
+                // if let Some(pose) = arrsac.model(&LambdaTwist::new(), features.iter().cloned()) {
+                //     info!("pose: {:?}", pose.0);
+                //     info!(
+                //         "pose: rotation: {} {} {}",
+                //         pose.0.rotation.transpose().euler_angles().0.to_degrees(),
+                //         pose.0.rotation.transpose().euler_angles().1.to_degrees(),
+                //         pose.0.rotation.transpose().euler_angles().2.to_degrees()
+                //     );
+                // } else {
+                //     info!("no solution found");
+                // }
+            }
+            Message::Edit(point) => {
+                info!("insert {point:?}")
             }
         }
     }
-    fn view(&self) -> Element<Message> {
+    fn view(&self) -> Element<'_, Message> {
         let Some(axis_data) = &self.axis_data else {
             return center(text("Loading...").width(Fill).align_x(Center).size(50)).into();
         };
+
         let component: Element<Message> = match self.mode {
-            UiMod::Pose => ComputeCameraPoseAll::new(
+            UiMod::Pose => ComputeCameraPoseTwist::new(
                 Rc::clone(axis_data),
                 Rc::clone(&self.draw_lines),
                 Rc::clone(&self.reference_cub),
@@ -648,6 +729,8 @@ impl Perspective {
                 Rc::clone(&self.custom_scale_segment),
                 Rc::clone(&self.custom_scale),
                 Rc::clone(&self.custom_error),
+                Rc::clone(&self.twist_points),
+                Rc::clone(&self.twist_points_2d),
             )
             .image_size(self.image_size)
             .width(Length::Fill)
@@ -672,7 +755,7 @@ impl Perspective {
                 UiMod::Pose => {
                     buttons.push(
                         mouse_area(container("Perform calculations").width(Length::Fill))
-                            .on_press(Message::CalculatePose)
+                            .on_press(Message::CalculatePoseUsingVanishingPoint)
                             .into(),
                     );
                     buttons.push(
@@ -769,13 +852,13 @@ impl Perspective {
 
         let focal_length = if let Some(compute_solution) = &self.compute_solution {
             format!(
-                "Focal lenght: {:.2} degrees, {:.2} mm",
+                "Focal lenght: {:.2} degrees",
                 compute_solution.field_of_view().to_degrees(),
-                compute_solution.focal_length()
             )
         } else {
             "Focal length not avaliable. Compute the solution".into()
         };
+
         column!(
             row!(
                 container(canvas_with_context_menu)
@@ -786,7 +869,29 @@ impl Perspective {
                 column!(
                     container(column!(
                         slider(0.25f32..=1.0f32, self.zoom, Message::ZoomChanged).step(0.05),
-                        text(focal_length)
+                        text(focal_length),
+                        self.editor_component.view(
+                            &(|action| {
+                                match action {
+                                    EditComponentMessage::Edit1(edit) => {
+                                        Message::Edit(TwistPointEdit::Point1(edit))
+                                    }
+
+                                    EditComponentMessage::Edit2(edit) => {
+                                        Message::Edit(TwistPointEdit::Point2(edit))
+                                    }
+
+                                    EditComponentMessage::Edit3(edit) => {
+                                        Message::Edit(TwistPointEdit::Point3(edit))
+                                    }
+
+                                    EditComponentMessage::None => {
+                                        Message::Edit(TwistPointEdit::None)
+                                    }
+                                }
+                            })
+                        ),
+                        //  twist_editor(&self.edit, |action| { Message::Edit('a') }),
                     ))
                     .padding(20),
                     scrollable(
@@ -842,6 +947,27 @@ impl From<&Perspective> for Lines {
                     z: item.z,
                 });
 
+        let twist_points = value
+            .twist_points
+            .borrow()
+            .iter()
+            .map(|item| StorePoint3d {
+                x: item.x,
+                y: item.y,
+                z: item.z,
+            })
+            .collect();
+
+        let twist_points_2d = value
+            .twist_points_2d
+            .borrow()
+            .iter()
+            .map(|item| StorePoint {
+                x: item.x,
+                y: item.y,
+            })
+            .collect();
+
         let custom_scale = axis_data.borrow().custom_scale;
         Lines {
             lines,
@@ -849,6 +975,8 @@ impl From<&Perspective> for Lines {
                 x: axis_data.borrow().control_point.x,
                 y: axis_data.borrow().control_point.y,
             },
+            twist_points: Some(twist_points),
+            twist_points_2d: Some(twist_points_2d),
             points: Some(
                 value
                     .draw_lines
@@ -958,7 +1086,7 @@ mod tests {
 
         let trans = Translation::from(Vector3::new(4.25837, 3.30374, 2.07094));
         let initial_pose = IsometryMatrix3::from_parts(trans, rot);
-        println!("transform matrix: {}", initial_pose.to_matrix());
+        info!("transform matrix: {}", initial_pose.to_matrix());
 
         Ok(())
     }

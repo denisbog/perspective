@@ -1,18 +1,15 @@
-#![no_std]
-#![warn(missing_docs)]
-
 use arrayvec::ArrayVec;
-use num_traits::Float;
-
 use cv::{
-    FeatureWorldMatch, Pose, Projective, WorldToCamera,
-    nalgebra::{Matrix3, Rotation3, Vector3},
-    sample_consensus::Estimator,
+    Estimator, WorldPoint,
+    nalgebra::{
+        Isometry3, Matrix3, Perspective3, Point2, Point3, Rotation3, Translation3, Unit, Vector2,
+        Vector3,
+    },
 };
-
+use cv_core::{Bearing, FeatureWorldMatch, Pose, Projective, WorldToCamera};
+use rand_distr::num_traits::Float;
 type Mat3 = Matrix3<f64>;
 type Vec3 = Vector3<f64>;
-
 #[derive(Copy, Clone, Debug, PartialEq)]
 #[non_exhaustive]
 pub struct LambdaTwist {
@@ -32,7 +29,6 @@ impl LambdaTwist {
     }
 
     /// Sets the [`LambdaTwist::gauss_newton_iterations`].
-    #[must_use]
     pub fn gauss_newton_iterations(self, gauss_newton_iterations: usize) -> Self {
         Self {
             gauss_newton_iterations,
@@ -41,7 +37,6 @@ impl LambdaTwist {
     }
 
     /// Sets the [`LambdaTwist::rotation_convergence_iterations`].
-    #[must_use]
     pub fn rotation_convergence_iterations(self, rotation_convergence_iterations: usize) -> Self {
         Self {
             rotation_convergence_iterations,
@@ -50,7 +45,6 @@ impl LambdaTwist {
     }
 
     /// Sets the [`LambdaTwist::rotation_convergence_epsilon`].
-    #[must_use]
     pub fn rotation_convergence_epsilon(self, rotation_convergence_epsilon: f64) -> Self {
         Self {
             rotation_convergence_epsilon,
@@ -67,11 +61,10 @@ impl LambdaTwist {
     ///
     /// The 3x3 matrix `world_3d_points` contains one 3D point per column.
     /// The 3x3 matrix `bearing_vectors` contains one homogeneous image coordinate per column.
-    fn compute_poses_nordberg(
+    fn compute_poses_nordberg<P: Bearing>(
         &self,
-        samples: [FeatureWorldMatch; 3],
-    ) -> ArrayVec<WorldToCamera, 4> {
-        println!("running {:?}", samples);
+        samples: [FeatureWorldMatch<P>; 3],
+    ) -> ArrayVec<[WorldToCamera; 4]> {
         // Extraction of 3D points vectors
         let to_wp = |&FeatureWorldMatch(_, point)| point.point();
         let wps = [
@@ -91,7 +84,7 @@ impl LambdaTwist {
                 return ArrayVec::new();
             },
         ];
-        let to_bearing = |&FeatureWorldMatch(bearing, _): &FeatureWorldMatch| bearing;
+        let to_bearing = |FeatureWorldMatch(point, _): &FeatureWorldMatch<P>| point.bearing();
         let bearings = [
             to_bearing(&samples[0]),
             to_bearing(&samples[1]),
@@ -147,18 +140,18 @@ impl LambdaTwist {
         let d0_12 = -c23 * (a13 * g - a12);
         let d0_22 = g * (a13 - a23) - a12;
         #[rustfmt::skip]
-    let d0_mat = Mat3::new(
-        d0_00, d0_01, d0_02,
-        d0_01, d0_11, d0_12,
-        d0_02, d0_12, d0_22,
-    );
+        let d0_mat = Mat3::new(
+            d0_00, d0_01, d0_02,
+            d0_01, d0_11, d0_12,
+            d0_02, d0_12, d0_22,
+        );
 
         // Get sorted eigenvectors and eigenvalues of the singular matrix D0.
         let (eig_vectors, eig_values) = eigen_decomposition_singular(d0_mat);
 
         // Initialize the possible depths triplets for the three image points.
         // There might be between 0 and 4 possible solutions.
-        let mut lambdas: ArrayVec<Vec3, 4> = ArrayVec::new();
+        let mut lambdas: ArrayVec<[Vec3; 4]> = ArrayVec::new();
 
         // Solve the four possible solutions for the depths values.
         let eigen_ratio = (0.0_f64.max(-eig_values[1] / eig_values[0])).sqrt();
@@ -218,12 +211,9 @@ impl LambdaTwist {
         // lambda_i * y_i = R * x_i + t
         // TODO: replace by the quaternion version.
         // According to the author, it works slightly better.
-        #[rustfmt::skip]
-    let x_mat = Mat3::new(
-        d12[0], d13[0], d12xd13[0],
-        d12[1], d13[1], d12xd13[1],
-        d12[2], d13[2], d12xd13[2],
-    );
+        let x_mat = Mat3::from_columns(&[d12, d13, d12xd13]);
+
+        println!("X mat {:?}", x_mat);
         let x_mat = if let Some(x_mat) = x_mat.try_inverse() {
             x_mat
         } else {
@@ -249,19 +239,14 @@ impl LambdaTwist {
                 let ry2 = lambda_refined[1] * *bearings[1];
                 let ry3 = lambda_refined[2] * *bearings[2];
 
-                let yd1 = ry1 - ry2;
-                let yd2 = ry1 - ry3;
+                let yd1 = -(ry1 - ry2);
+                let yd2 = -(ry1 - ry3);
                 let yd1xd2 = yd1.cross(&yd2);
 
-                #[rustfmt::skip]
-            let y_mat = Mat3::new(
-                yd1[0], yd2[0], yd1xd2[0],
-                yd1[1], yd2[1], yd1xd2[1],
-                yd1[2], yd2[2], yd1xd2[2],
-            );
+                let y_mat = Mat3::from_columns(&[yd1, yd2, yd1xd2]);
 
                 let rot = y_mat * x_mat;
-                (rot, ry1 - rot * wps[0].coords)
+                (rot, -ry1 - rot * wps[0].coords)
             })
             .map(|(rot, trans)| {
                 WorldToCamera::from_parts(
@@ -273,10 +258,6 @@ impl LambdaTwist {
                         Rotation3::identity(),
                     ),
                 )
-            })
-            .map(|item| {
-                println!("{:?}", item);
-                item
             })
             .collect()
     }
@@ -292,13 +273,16 @@ impl Default for LambdaTwist {
     }
 }
 
-impl Estimator<FeatureWorldMatch> for LambdaTwist {
+impl<P> Estimator<FeatureWorldMatch<P>> for LambdaTwist
+where
+    P: Bearing,
+{
     type Model = WorldToCamera;
-    type ModelIter = ArrayVec<WorldToCamera, 4>;
+    type ModelIter = ArrayVec<[WorldToCamera; 4]>;
     const MIN_SAMPLES: usize = 3;
     fn estimate<I>(&self, mut data: I) -> Self::ModelIter
     where
-        I: Iterator<Item = FeatureWorldMatch> + Clone,
+        I: Iterator<Item = FeatureWorldMatch<P>> + Clone,
     {
         self.compute_poses_nordberg([
             data.next()

@@ -8,3 +8,4 @@ publish = false
 iced.workspace = true
 iced.features = ["advanced"]
 tracing.workspace = true
+nalgebra.workspace = true

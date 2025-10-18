@@ -385,4 +385,6 @@ distance to a line
 
 ```sh
 RUST_LOG=perspective=trace cargo r --release -- -i perspective.jpg
+RUST_LOG=local_test=trace cargo test --release local_test::local_tests::twist_test -- --no-capture
+RUST_LOG=perspective=trace cargo r --release -- 7.54 3.77 2.75 -i twist/2025*.jpg
 ```

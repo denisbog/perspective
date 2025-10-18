@@ -7,14 +7,17 @@ pub mod draw_decoration;
 pub mod encoder;
 pub mod frustum;
 pub mod fspy;
+pub mod local_test;
 pub mod optimize;
+pub mod read_state;
 pub mod twist;
 pub mod twist_point;
+pub mod twist_pose_all;
 pub mod utils;
 use std::fmt::Debug;
 
 use iced::Point;
-use nalgebra::{Scalar, Vector2, Vector3};
+use nalgebra::{Point2, Point3, Scalar, Vector2, Vector3};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -74,6 +77,7 @@ pub enum Edit {
     Scale(EditAxis),
     VanishingPoint(EditAxis),
     VanishingLines(EditAxis),
+    Twist,
     #[default]
     None,
 }
@@ -98,6 +102,8 @@ pub struct AxisData {
     pub flip: (bool, bool, bool),
     pub custom_origin_translation: Option<Vector3<f32>>,
     pub custom_scale: Option<f32>,
+    pub twist_points: Option<Vec<Point3<f32>>>,
+    pub twist_points_2d: Option<Vec<Point2<f32>>>,
 }
 
 impl Default for AxisData {
@@ -133,6 +139,17 @@ impl Default for AxisData {
             flip: (false, false, false),
             custom_origin_translation: None,
             custom_scale: None,
+            twist_points: Some(vec![
+                Point3::new(7.54, 0.0, 0.0),
+                Point3::new(3.14, 0.0, 2.4),
+                Point3::new(3.57, 3.61, 0.0),
+            ]),
+
+            twist_points_2d: Some(vec![
+                Point2::new(0.5, 0.5),
+                Point2::new(0.5, 0.5),
+                Point2::new(0.5, 0.5),
+            ]),
         }
     }
 }
