@@ -665,7 +665,7 @@ impl Perspective {
                 let fy = self.image_size.height as f64;
                 let cx = self.image_size.width as f64 / 2.0;
                 let cy = self.image_size.height as f64 / 2.0;
-                let field_of_view = 101f64.to_radians();
+                let field_of_view = 102f64.to_radians();
                 let unprojection =
                     cv::nalgebra::Perspective3::new(1.0, field_of_view, 0.1, 1000.0).inverse();
                 let to_device_coord_transform = cv::nalgebra::Matrix3::new_nonuniform_scaling(

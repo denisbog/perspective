@@ -654,6 +654,9 @@ where
         let color_green = Color::from_rgba(0.2, 0.8, 0.2, 0.8);
         let color_blue = Color::from_rgba(0.2, 0.2, 0.8, 0.8);
         let draw = self.cache.draw(renderer, bounds.size(), |frame| {
+            if self.compute_solution.borrow().as_ref().is_none() {
+                return;
+            }
             *state.points.borrow_mut() = self
                 .draw_lines
                 .borrow()
