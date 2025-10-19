@@ -77,8 +77,8 @@ pub enum Edit {
     Scale(EditAxis),
     VanishingPoint(EditAxis),
     VanishingLines(EditAxis),
-    Twist,
     #[default]
+    Twist,
     None,
 }
 

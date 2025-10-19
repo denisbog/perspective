@@ -1425,7 +1425,7 @@ where
                 vec![vanishing_lines_cache, draw_lines_cache, draw, axis_cache]
             }
             Edit::Twist => {
-                vec![twist_point]
+                vec![twist_point, draw_lines_cache, draw]
             }
             _ => vec![vanishing_lines_cache, draw_lines_cache, draw],
         }

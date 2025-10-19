@@ -23,6 +23,7 @@ use perspective::twist::LambdaTwist;
 use perspective::twist_pose_all::ComputeCameraPoseTwist;
 use perspective::{AxisData, PointInformation};
 use std::cell::RefCell;
+use std::cmp::Ordering;
 use std::fmt::Debug;
 use std::fs::File;
 use std::io::Write;
@@ -71,6 +72,7 @@ pub fn main() -> iced::Result {
 enum UiMod {
     #[default]
     Pose,
+    Twist,
 }
 
 #[derive(Debug, Clone)]
@@ -356,8 +358,68 @@ impl Perspective {
                         .unwrap()
                         .clone(),
                 ));
+
+                let first = self.twist_points.borrow().first().unwrap().clone();
+                let min = self
+                    .twist_points
+                    .borrow()
+                    .iter()
+                    .skip(1)
+                    .fold(first, |mut acc, item| {
+                        if acc.x > item.x {
+                            acc.x = item.x;
+                        }
+                        if acc.y > item.y {
+                            acc.y = item.y;
+                        }
+                        if acc.z > item.z {
+                            acc.z = item.z;
+                        }
+                        acc
+                    });
+                let first = self.twist_points.borrow().first().unwrap().clone();
+                let max = self
+                    .twist_points
+                    .borrow()
+                    .iter()
+                    .skip(1)
+                    .fold(first, |mut acc, item| {
+                        if acc.x < item.x {
+                            acc.x = item.x;
+                        }
+                        if acc.y < item.y {
+                            acc.y = item.y;
+                        }
+                        if acc.z < item.z {
+                            acc.z = item.z;
+                        }
+                        acc
+                    });
+
+                info!("min {}, max {}", min, max);
+                let size = max - min;
+                let mut draw_lines = vec![
+                    Point3::<f32>::new(0.0, 0.0, 0.0),
+                    Point3::<f32>::new(size.x, 0.0, 0.0),
+                    Point3::<f32>::new(size.x, size.y, 0.0),
+                    Point3::<f32>::new(0.0, size.y, 0.0),
+                    Point3::<f32>::new(0.0, 0.0, 0.0),
+                    // z
+                    Point3::<f32>::new(0.0, 0.0, size.z),
+                    Point3::<f32>::new(size.x, 0.0, size.z),
+                    Point3::<f32>::new(size.x, size.y, size.z),
+                    Point3::<f32>::new(0.0, size.y, size.z),
+                    Point3::<f32>::new(0.0, 0.0, size.z),
+                ];
+
+                draw_lines
+                    .iter_mut()
+                    .for_each(|item| item.coords += min.coords);
+                *self.reference_cub.borrow_mut() = draw_lines;
+
                 self.editor_component = EditorComponent::new(self.twist_points.clone());
-                self.update(Message::CalculatePoseUsingVanishingPoint);
+                // self.update(Message::CalculatePoseUsingVanishingPoint);
+                self.update(Message::PoseLambdaTwist);
             }
             Message::ChangeMode(mode) => {
                 self.mode = mode;
@@ -663,36 +725,50 @@ impl Perspective {
 
                 let solver = LambdaTwist::new();
                 use cv::Estimator;
-                let candidates = solver.estimate(features.iter().cloned());
+                let mut candidates = solver.estimate(features.iter().cloned());
+
+                //sort by Y rotation, most vertical position
+                candidates.sort_by(|a, b| {
+                    if a.0.rotation.inverse().euler_angles().1.abs()
+                        < b.0.rotation.inverse().euler_angles().1.abs()
+                    {
+                        Ordering::Less
+                    } else {
+                        Ordering::Greater
+                    }
+                });
+
                 candidates
                     .iter()
                     .for_each(|item| info!("solution: {}", item.0.to_homogeneous()));
-                let item = candidates.iter().last().unwrap();
-                let solution = item.0.to_homogeneous();
-                info!("using the last solution {solution}");
-                self.compute_solution = Some(ComputeSolution::new(
-                    Matrix4::new(
-                        solution.m11 as f32,
-                        solution.m12 as f32,
-                        solution.m13 as f32,
-                        solution.m14 as f32,
-                        solution.m21 as f32,
-                        solution.m22 as f32,
-                        solution.m23 as f32,
-                        solution.m24 as f32,
-                        solution.m31 as f32,
-                        solution.m32 as f32,
-                        solution.m33 as f32,
-                        solution.m34 as f32,
-                        solution.m41 as f32,
-                        solution.m42 as f32,
-                        solution.m43 as f32,
-                        solution.m44 as f32,
-                    ),
-                    Vector2::new(0.0, 0.0),
-                    field_of_view as f32,
-                ));
 
+                if candidates.len() > 0 {
+                    let item = candidates.iter().next().unwrap();
+                    let solution = item.0.to_homogeneous();
+                    info!("using the first solution {solution}");
+                    self.compute_solution = Some(ComputeSolution::new(
+                        Matrix4::new(
+                            solution.m11 as f32,
+                            solution.m12 as f32,
+                            solution.m13 as f32,
+                            solution.m14 as f32,
+                            solution.m21 as f32,
+                            solution.m22 as f32,
+                            solution.m23 as f32,
+                            solution.m24 as f32,
+                            solution.m31 as f32,
+                            solution.m32 as f32,
+                            solution.m33 as f32,
+                            solution.m34 as f32,
+                            solution.m41 as f32,
+                            solution.m42 as f32,
+                            solution.m43 as f32,
+                            solution.m44 as f32,
+                        ),
+                        Vector2::new(0.0, 0.0),
+                        field_of_view as f32,
+                    ));
+                }
                 // use cv::Consensus;
                 // // Estimate potential poses with P3P.
                 // // Arrsac should use the fourth point to filter and find only one model from the 4 generated.
@@ -720,7 +796,7 @@ impl Perspective {
         };
 
         let component: Element<Message> = match self.mode {
-            UiMod::Pose => ComputeCameraPoseTwist::new(
+            UiMod::Pose | UiMod::Twist => ComputeCameraPoseTwist::new(
                 Rc::clone(axis_data),
                 Rc::clone(&self.draw_lines),
                 Rc::clone(&self.reference_cub),
@@ -752,7 +828,7 @@ impl Perspective {
         let canvas_with_context_menu = ContextMenu::new(canvas, move || {
             let mut buttons = Vec::new();
             match self.mode {
-                UiMod::Pose => {
+                UiMod::Pose | UiMod::Twist => {
                     buttons.push(
                         mouse_area(container("Perform calculations").width(Length::Fill))
                             .on_press(Message::CalculatePoseUsingVanishingPoint)
@@ -1017,7 +1093,7 @@ mod tests {
         optimize::ortho_center_optimize,
         utils::relative_to_image_plane,
     };
-    use tracing::trace;
+    use tracing::{info, trace};
     use tracing_subscriber::EnvFilter;
 
     #[tokio::test]
