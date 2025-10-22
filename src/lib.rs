@@ -104,6 +104,7 @@ pub struct AxisData {
     pub custom_scale: Option<f32>,
     pub twist_points: Option<Vec<Point3<f32>>>,
     pub twist_points_2d: Option<Vec<Point2<f32>>>,
+    pub field_of_view: Option<f32>,
 }
 
 impl Default for AxisData {
@@ -150,6 +151,7 @@ impl Default for AxisData {
                 Point2::new(0.5, 0.5),
                 Point2::new(0.5, 0.5),
             ]),
+            field_of_view: Some(102.0),
         }
     }
 }

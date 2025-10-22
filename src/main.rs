@@ -103,6 +103,7 @@ enum Message {
     Optimize,
     OptimizeForError,
     ZoomChanged(f32),
+    FieldOfViewChanged(f32),
     ScaleToDimension,
     OptimizeX,
     PoseLambdaTwist,
@@ -133,6 +134,7 @@ struct Perspective {
     twist_points: Rc<RefCell<Vec<Point3<f32>>>>,
     twist_points_2d: Rc<RefCell<Vec<Point2<f32>>>>,
     editor_component: EditorComponent,
+    field_of_view: f32,
 }
 
 fn extract_state(state: Result<(Option<ImageData>, Size<u32>)>) -> Message {
@@ -210,6 +212,7 @@ impl Perspective {
             twist_points,
             twist_points_2d,
             editor_component,
+            field_of_view: 102.0,
             ..Self::default()
         };
         (
@@ -358,7 +361,13 @@ impl Perspective {
                         .unwrap()
                         .clone(),
                 ));
-
+                self.field_of_view = if let Some(field_of_view) =
+                    self.axis_data.as_ref().unwrap().borrow().field_of_view
+                {
+                    field_of_view
+                } else {
+                    102.0
+                };
                 let first = self.twist_points.borrow().first().unwrap().clone();
                 let min = self
                     .twist_points
@@ -397,7 +406,16 @@ impl Perspective {
                     });
 
                 info!("min {}, max {}", min, max);
-                let size = max - min;
+                let mut size = max - min;
+                if size.x == 0.0 {
+                    size.x = 1.0
+                }
+                if size.y == 0.0 {
+                    size.y = 1.0
+                }
+                if size.z == 0.0 {
+                    size.z = 1.0
+                }
                 let mut draw_lines = vec![
                     Point3::<f32>::new(0.0, 0.0, 0.0),
                     Point3::<f32>::new(size.x, 0.0, 0.0),
@@ -660,14 +678,20 @@ impl Perspective {
                 self.update(Message::CalculatePoseUsingVanishingPoint);
             }
             Message::ZoomChanged(zoom) => self.zoom = zoom,
+            Message::FieldOfViewChanged(field_of_view) => {
+                self.field_of_view = field_of_view;
+                self.update(Message::PoseLambdaTwist);
+            }
             Message::PoseLambdaTwist => {
                 let fx = self.image_size.width as f64;
                 let fy = self.image_size.height as f64;
                 let cx = self.image_size.width as f64 / 2.0;
                 let cy = self.image_size.height as f64 / 2.0;
-                let field_of_view = 102f64.to_radians();
+                let field_of_view = self.field_of_view.to_radians();
+
                 let unprojection =
-                    cv::nalgebra::Perspective3::new(1.0, field_of_view, 0.1, 1000.0).inverse();
+                    cv::nalgebra::Perspective3::new(1.0, field_of_view as f64, 0.1, 1000.0)
+                        .inverse();
                 let to_device_coord_transform = cv::nalgebra::Matrix3::new_nonuniform_scaling(
                     &cv::nalgebra::Vector2::new(fx / 2.0, -fx / 2.0),
                 )
@@ -766,7 +790,7 @@ impl Perspective {
                             solution.m44 as f32,
                         ),
                         Vector2::new(0.0, 0.0),
-                        field_of_view as f32,
+                        self.field_of_view.to_radians(),
                     ));
                 }
                 // use cv::Consensus;
@@ -928,7 +952,7 @@ impl Perspective {
 
         let focal_length = if let Some(compute_solution) = &self.compute_solution {
             format!(
-                "Focal lenght: {:.2} degrees",
+                "Field of view: {:.2} degrees",
                 compute_solution.field_of_view().to_degrees(),
             )
         } else {
@@ -944,8 +968,15 @@ impl Perspective {
                     .align_y(Vertical::Center),
                 column!(
                     container(column!(
+                        text("Scale"),
                         slider(0.25f32..=1.0f32, self.zoom, Message::ZoomChanged).step(0.05),
-                        text(focal_length),
+                        text(format!("Field of View {:.1}", self.field_of_view)),
+                        slider(
+                            90.0f32..=110.0f32,
+                            self.field_of_view,
+                            Message::FieldOfViewChanged
+                        )
+                        .step(0.1),
                         self.editor_component.view(
                             &(|action| {
                                 match action {
@@ -1053,6 +1084,7 @@ impl From<&Perspective> for Lines {
             },
             twist_points: Some(twist_points),
             twist_points_2d: Some(twist_points_2d),
+            field_of_view: Some(value.field_of_view),
             points: Some(
                 value
                     .draw_lines

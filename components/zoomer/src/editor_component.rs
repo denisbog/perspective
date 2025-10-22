@@ -3,11 +3,7 @@ use std::{cell::RefCell, rc::Rc};
 use iced::{
     Element,
     alignment::Vertical,
-    widget::{
-        column, row, text,
-        text_editor::{self, Action},
-        text_input,
-    },
+    widget::{column, row, text, text_input},
 };
 use nalgebra::Point3;
 
@@ -88,41 +84,76 @@ impl<'a> EditorComponent {
         column!(
             row!(
                 text!("Point #1"),
-                text_input("x", &self.twist_points.borrow()[0].x.to_string())
-                    .on_input(|action| { self.handle_update(0, 1, action, on_edit) }),
-                text_input("y", &self.twist_points.borrow()[0].y.to_string())
-                    .on_input(|action| { self.handle_update(0, 2, action, on_edit) }),
-                text_input("z", &self.twist_points.borrow()[0].z.to_string())
-                    .on_input(|action| { self.handle_update(0, 3, action, on_edit) }),
+                text_input(
+                    "x",
+                    &EditorComponent::edit_string(self.twist_points.borrow()[0].x)
+                )
+                .on_input(|action| { self.handle_update(0, 1, action, on_edit) }),
+                text_input(
+                    "z",
+                    &EditorComponent::edit_string(self.twist_points.borrow()[0].y)
+                )
+                .on_input(|action| { self.handle_update(0, 2, action, on_edit) }),
+                text_input(
+                    "z",
+                    &EditorComponent::edit_string(self.twist_points.borrow()[0].z)
+                )
+                .on_input(|action| { self.handle_update(0, 3, action, on_edit) }),
             )
             .align_y(Vertical::Center)
             .padding(5.0)
             .spacing(5.0),
             row!(
                 text!("Point #2"),
-                text_input("x", &self.twist_points.borrow()[1].x.to_string())
-                    .on_input(|action| { self.handle_update(1, 1, action, on_edit) }),
-                text_input("y", &self.twist_points.borrow()[1].y.to_string())
-                    .on_input(|action| { self.handle_update(1, 2, action, on_edit) }),
-                text_input("z", &self.twist_points.borrow()[1].z.to_string())
-                    .on_input(|action| { self.handle_update(1, 3, action, on_edit) }),
+                text_input(
+                    "x",
+                    &EditorComponent::edit_string(self.twist_points.borrow()[1].x),
+                )
+                .on_input(|action| { self.handle_update(1, 1, action, on_edit) }),
+                text_input(
+                    "y",
+                    &EditorComponent::edit_string(self.twist_points.borrow()[1].y)
+                )
+                .on_input(|action| { self.handle_update(1, 2, action, on_edit) }),
+                text_input(
+                    "z",
+                    &EditorComponent::edit_string(self.twist_points.borrow()[1].z)
+                )
+                .on_input(|action| { self.handle_update(1, 3, action, on_edit) }),
             )
             .align_y(Vertical::Center)
             .padding(5.0)
             .spacing(5.0),
             row!(
                 text!("Point #3"),
-                text_input("x", &self.twist_points.borrow()[2].x.to_string())
-                    .on_input(|action| { self.handle_update(2, 1, action, on_edit) }),
-                text_input("y", &self.twist_points.borrow()[2].y.to_string())
-                    .on_input(|action| { self.handle_update(2, 2, action, on_edit) }),
-                text_input("z", &self.twist_points.borrow()[2].z.to_string())
-                    .on_input(|action| { self.handle_update(2, 3, action, on_edit) }),
+                text_input(
+                    "x",
+                    &EditorComponent::edit_string(self.twist_points.borrow()[2].x)
+                )
+                .on_input(|action| { self.handle_update(2, 1, action, on_edit) }),
+                text_input(
+                    "y",
+                    &EditorComponent::edit_string(self.twist_points.borrow()[2].y)
+                )
+                .on_input(|action| { self.handle_update(2, 2, action, on_edit) }),
+                text_input(
+                    "z",
+                    &EditorComponent::edit_string(self.twist_points.borrow()[2].z)
+                )
+                .on_input(|action| { self.handle_update(2, 3, action, on_edit) }),
             )
             .align_y(Vertical::Center)
             .padding(5.0)
             .spacing(5.0),
         )
         .into()
+    }
+
+    fn edit_string(value: f32) -> String {
+        if value == 0.0 {
+            "0.0".to_string()
+        } else {
+            format!("{value:.2}")
+        }
     }
 }

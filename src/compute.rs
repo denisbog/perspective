@@ -36,7 +36,9 @@ pub struct Lines {
     pub custom_scale: Option<f32>,
     pub twist_points: Option<Vec<StorePoint3d>>,
     pub twist_points_2d: Option<Vec<StorePoint>>,
+    pub field_of_view: Option<f32>,
 }
+
 #[derive(Serialize, Deserialize)]
 pub struct StoreLine {
     pub a: StorePoint,
@@ -257,6 +259,7 @@ pub fn read_points_from_file(points: &String) -> Result<(AxisData, Option<Vec<Ve
     } else {
         None
     };
+    let field_of_view = data.field_of_view;
     Ok((
         AxisData {
             control_point,
@@ -266,6 +269,7 @@ pub fn read_points_from_file(points: &String) -> Result<(AxisData, Option<Vec<Ve
             custom_scale,
             twist_points,
             twist_points_2d,
+            field_of_view,
         },
         points,
     ))
