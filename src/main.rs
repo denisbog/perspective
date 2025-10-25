@@ -1,11 +1,9 @@
-use clap::{Args, Parser};
+use clap::Parser;
 use cv::FeatureWorldMatch;
 use iced::Alignment::Center;
 use iced::Length::Fill;
 use iced::alignment::{Horizontal, Vertical};
-use iced::event::Status;
 use iced::futures::executor::block_on;
-use iced::keyboard::key;
 use iced::widget::scrollable::{Direction, Scrollbar};
 use iced::widget::{
     center, column, container, image, mouse_area, row, scrollable, slider, stack, text,
@@ -837,13 +835,8 @@ impl Perspective {
             .into(),
             UiMod::Twist => ComputeCameraPoseTwist::new(
                 Rc::clone(axis_data),
-                Rc::clone(&self.draw_lines),
                 Rc::clone(&self.reference_cube),
                 &self.compute_solution,
-                Rc::clone(&self.custom_origin_translation),
-                Rc::clone(&self.custom_scale_segment),
-                Rc::clone(&self.custom_scale),
-                Rc::clone(&self.custom_error),
                 Rc::clone(&self.twist_points),
                 Rc::clone(&self.twist_points_2d),
             )
