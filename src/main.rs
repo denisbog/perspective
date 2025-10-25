@@ -3,13 +3,16 @@ use cv::FeatureWorldMatch;
 use iced::Alignment::Center;
 use iced::Length::Fill;
 use iced::alignment::{Horizontal, Vertical};
+use iced::event::Status;
 use iced::futures::executor::block_on;
+use iced::keyboard::key;
 use iced::widget::scrollable::{Direction, Scrollbar};
 use iced::widget::{
     center, column, container, image, mouse_area, row, scrollable, slider, stack, text,
 };
-use iced::{Element, Length, Point, Size, Task, Theme};
+use iced::{Element, Length, Point, Size, Task, Theme, keyboard};
 use nalgebra::{Matrix4, Point2, Point3, Vector2, Vector3};
+use perspective::camera_pose_all::ComputeCameraPose;
 use perspective::compute::data::ComputeSolution;
 use perspective::compute::{
     Lines, StoreLine, StorePoint, StorePoint3d, compute_camera_pose_scale, compute_ui_adapter,
@@ -43,17 +46,8 @@ struct Cli {
     points: Option<String>,
     #[arg(short, long)]
     dimension: Option<f32>,
-    #[command(flatten)]
-    reference: Option<ReferenceCub>,
     #[arg(short, long, value_delimiter = ' ', num_args = 1.., default_value = "perspective.jpg")]
     images: Vec<String>,
-}
-
-#[derive(Debug, Args)]
-struct ReferenceCub {
-    x: f32,
-    y: f32,
-    z: f32,
 }
 
 pub fn main() -> iced::Result {
@@ -65,13 +59,28 @@ pub fn main() -> iced::Result {
         .theme(Perspective::theme)
         .antialiasing(true)
         .centered()
+        .subscription(|_state| {
+            keyboard::on_key_release(|key, _modifiers| {
+                let keyboard::Key::Character(c) = key else {
+                    return None;
+                };
+
+                let c = c.as_str();
+
+                match c {
+                    "'" => Some(Message::ChangeMode(UiMod::Twist)),
+                    "y" => Some(Message::ChangeMode(UiMod::Pose)),
+                    _ => None,
+                }
+            })
+        })
         .run()
 }
 
 #[derive(Default, Clone, Debug)]
 enum UiMod {
-    #[default]
     Pose,
+    #[default]
     Twist,
 }
 
@@ -121,7 +130,7 @@ struct Perspective {
     compute_solution: Option<ComputeSolution<f32>>,
     image_size: Size<f32>,
     draw_lines: Rc<RefCell<Vec<Vector3<f32>>>>,
-    reference_cub: Rc<RefCell<Vec<Point3<f32>>>>,
+    reference_cube: Rc<RefCell<Vec<Point3<f32>>>>,
     selected_image: u8,
     images: Vec<String>,
     mode: UiMod,
@@ -164,28 +173,7 @@ impl Perspective {
         };
         let export_file_name = format!("{}.fspy", image_name);
         let dimension = args.dimension;
-        let reference_cub = if let Some(reference) = args.reference {
-            match reference {
-                ReferenceCub { x, y, z } => {
-                    let draw_lines = Rc::new(RefCell::new(vec![
-                        Point3::<f32>::new(0.0, 0.0, 0.0),
-                        Point3::<f32>::new(x, 0.0, 0.0),
-                        Point3::<f32>::new(x, y, 0.0),
-                        Point3::<f32>::new(0.0, y, 0.0),
-                        Point3::<f32>::new(0.0, 0.0, 0.0),
-                        // z
-                        Point3::<f32>::new(0.0, 0.0, z),
-                        Point3::<f32>::new(x, 0.0, z),
-                        Point3::<f32>::new(x, y, z),
-                        Point3::<f32>::new(0.0, y, z),
-                        Point3::<f32>::new(0.0, 0.0, z),
-                    ]));
-                    draw_lines
-                }
-            }
-        } else {
-            Rc::new(RefCell::new(vec![Point3::<f32>::new(0.0, 0.0, 0.0)]))
-        };
+        let reference_cub = Rc::new(RefCell::new(vec![Point3::<f32>::new(0.0, 0.0, 0.0)]));
 
         let twist_points = Rc::new(RefCell::new(vec![
             Point3::new(7.54, 0.0, 0.0),
@@ -203,7 +191,7 @@ impl Perspective {
         let init = Perspective {
             image_path: first_image.clone(),
             draw_lines,
-            reference_cub,
+            reference_cube: reference_cub,
             images: args.images,
             export_file_name,
             points_file_name: points.clone(),
@@ -416,7 +404,7 @@ impl Perspective {
                 if size.z == 0.0 {
                     size.z = 1.0
                 }
-                let mut draw_lines = vec![
+                let mut reference_cube = vec![
                     Point3::<f32>::new(0.0, 0.0, 0.0),
                     Point3::<f32>::new(size.x, 0.0, 0.0),
                     Point3::<f32>::new(size.x, size.y, 0.0),
@@ -430,10 +418,21 @@ impl Perspective {
                     Point3::<f32>::new(0.0, 0.0, size.z),
                 ];
 
-                draw_lines
+                for i in 0..=size.y as usize {
+                    reference_cube.push(Point3::<f32>::new(0.0, 0.0 + i as f32, 0.0));
+                    reference_cube.push(Point3::<f32>::new(size.x, 0.0 + i as f32, 0.0));
+                }
+
+                for i in 0..=size.x as usize {
+                    reference_cube.push(Point3::<f32>::new(0.0 + i as f32, 0.0, 0.0));
+                    reference_cube.push(Point3::<f32>::new(0.0 + i as f32, size.y, 0.0));
+                }
+
+                reference_cube
                     .iter_mut()
                     .for_each(|item| item.coords += min.coords);
-                *self.reference_cub.borrow_mut() = draw_lines;
+
+                *self.reference_cube.borrow_mut() = reference_cube;
 
                 self.editor_component = EditorComponent::new(self.twist_points.clone());
                 // self.update(Message::CalculatePoseUsingVanishingPoint);
@@ -820,10 +819,26 @@ impl Perspective {
         };
 
         let component: Element<Message> = match self.mode {
-            UiMod::Pose | UiMod::Twist => ComputeCameraPoseTwist::new(
+            UiMod::Pose => ComputeCameraPose::new(
                 Rc::clone(axis_data),
                 Rc::clone(&self.draw_lines),
-                Rc::clone(&self.reference_cub),
+                Rc::clone(&self.reference_cube),
+                &self.compute_solution,
+                Rc::clone(&self.custom_origin_translation),
+                Rc::clone(&self.custom_scale_segment),
+                Rc::clone(&self.custom_scale),
+                Rc::clone(&self.custom_error),
+                Rc::clone(&self.twist_points),
+                Rc::clone(&self.twist_points_2d),
+            )
+            .image_size(self.image_size)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into(),
+            UiMod::Twist => ComputeCameraPoseTwist::new(
+                Rc::clone(axis_data),
+                Rc::clone(&self.draw_lines),
+                Rc::clone(&self.reference_cube),
                 &self.compute_solution,
                 Rc::clone(&self.custom_origin_translation),
                 Rc::clone(&self.custom_scale_segment),
@@ -852,7 +867,7 @@ impl Perspective {
         let canvas_with_context_menu = ContextMenu::new(canvas, move || {
             let mut buttons = Vec::new();
             match self.mode {
-                UiMod::Pose | UiMod::Twist => {
+                UiMod::Pose => {
                     buttons.push(
                         mouse_area(container("Perform calculations").width(Length::Fill))
                             .on_press(Message::CalculatePoseUsingVanishingPoint)
@@ -941,12 +956,24 @@ impl Perspective {
                             .into(),
                     );
                 }
+                UiMod::Twist => {
+                    buttons.push(
+                        mouse_area(container("Export Pose To FSpy").width(Length::Fill))
+                            .on_press(Message::ExportToFSpy)
+                            .into(),
+                    );
+                    buttons.push(
+                        mouse_area(container("Save lines").width(Length::Fill))
+                            .on_press(Message::Save)
+                            .into(),
+                    );
+                    buttons.push(
+                        mouse_area(container("Pose Lambda Twist").width(Length::Fill))
+                            .on_press(Message::PoseLambdaTwist)
+                            .into(),
+                    );
+                }
             }
-            buttons.push(
-                mouse_area(container("Pose Lambda Twist").width(Length::Fill))
-                    .on_press(Message::PoseLambdaTwist)
-                    .into(),
-            );
             column(buttons).width(300).padding(5).spacing(7).into()
         });
 

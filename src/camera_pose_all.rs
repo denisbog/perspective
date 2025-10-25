@@ -41,7 +41,7 @@ enum CameraPoseMessage {
     Editline { component: Option<Component> },
     MoveControlPoint { cursor: Point },
 }
-pub struct ComputeCameraPoseAll<Message, Theme = iced::Theme, Renderer = iced::Renderer>
+pub struct ComputeCameraPose<Message, Theme = iced::Theme, Renderer = iced::Renderer>
 where
     Renderer: geometry::Renderer,
 {
@@ -49,6 +49,7 @@ where
     height: Length,
     message_: PhantomData<Message>,
     cache: geometry::Cache<Renderer>,
+    twist_points_cache: geometry::Cache<Renderer>,
     axis_cache: geometry::Cache<Renderer>,
     draw_lines_cache: geometry::Cache<Renderer>,
     vanishing_lines_cache: geometry::Cache<Renderer>,
@@ -65,8 +66,10 @@ where
     custom_scale_segment: Rc<RefCell<Option<usize>>>,
     custom_scale: Rc<RefCell<Option<PointInformation<f32>>>>,
     custom_error: Rc<RefCell<Option<PointInformation<f32>>>>,
+    twist_points: Rc<RefCell<Vec<Point3<f32>>>>,
+    twist_points_2d: Rc<RefCell<Vec<Point2<f32>>>>,
 }
-impl<'a, M, Theme, Renderer> ComputeCameraPoseAll<M, Theme, Renderer>
+impl<'a, M, Theme, Renderer> ComputeCameraPose<M, Theme, Renderer>
 where
     Renderer: geometry::Renderer,
 {
@@ -81,8 +84,10 @@ where
         custom_scale_segment: Rc<RefCell<Option<usize>>>,
         custom_scale: Rc<RefCell<Option<PointInformation<f32>>>>,
         custom_error: Rc<RefCell<Option<PointInformation<f32>>>>,
+        twist_points: Rc<RefCell<Vec<Point3<f32>>>>,
+        twist_points_2d: Rc<RefCell<Vec<Point2<f32>>>>,
     ) -> Self {
-        ComputeCameraPoseAll {
+        ComputeCameraPose {
             width: Length::Fixed(Self::DEFAULT_SIZE),
             height: Length::Fixed(Self::DEFAULT_SIZE),
             compute_solution: RefCell::new(compute_solution.clone()),
@@ -91,6 +96,7 @@ where
             renderer_: PhantomData,
             theme_: PhantomData,
             cache: geometry::Cache::default(),
+            twist_points_cache: geometry::Cache::default(),
             axis_cache: geometry::Cache::default(),
             draw_lines_cache: geometry::Cache::new(),
             vanishing_lines_cache: geometry::Cache::default(),
@@ -102,6 +108,8 @@ where
             custom_scale_segment,
             custom_scale,
             custom_error,
+            twist_points,
+            twist_points_2d,
         }
     }
     pub fn width(mut self, width: impl Into<Length>) -> Self {
@@ -306,6 +314,10 @@ where
                         state.edit_state = Edit::MarkError(EditAxis::None);
                         (Status::Captured, None)
                     }
+                    "p" => {
+                        state.edit_state = Edit::Twist;
+                        (Status::Captured, None)
+                    }
                     _ => (Status::Ignored, None),
                 }
             }
@@ -461,11 +473,32 @@ where
                             (Status::Ignored, None)
                         }
                     }
+                    Edit::Twist => {
+                        let cursor = Point::new(adjusted_cursor.x, adjusted_cursor.y);
+                        self.twist_points_2d.borrow().iter().enumerate().for_each(
+                            |(index, item)| {
+                                let item = scale_point_to_canvas(
+                                    &Point::new(item.x, item.y),
+                                    bounds.size(),
+                                );
+                                if cursor.distance(item) < 10.0 {
+                                    state.selected_match_point = Some(index);
+                                }
+                            },
+                        );
+                        (Status::Captured, None)
+                    }
                     _ => (Status::Ignored, None),
                 }
             }
 
             Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
+                if let Edit::Twist = state.edit_state {
+                    println!("clear");
+                    state.selected_match_point = None;
+                    self.twist_points_cache.clear();
+                    return (Status::Captured, None);
+                }
                 let Some((new_point_3d, last_point_3d, _color)) =
                     self.extract_last_point_details_for_mode(state, bounds, &adjusted_cursor)
                 else {
@@ -507,6 +540,7 @@ where
                         self.draw_lines_cache.clear();
                         state.edit_state = Edit::Draw;
                     }
+
                     _ => (),
                 }
                 (Status::Captured, None)
@@ -588,6 +622,19 @@ where
                             cursor: scale_cursor,
                         }),
                     ),
+                    Edit::Twist => {
+                        if let Some(selected_match_point) = state.selected_match_point {
+                            *self
+                                .twist_points_2d
+                                .borrow_mut()
+                                .get_mut(selected_match_point)
+                                .unwrap() = Point2::new(scale_cursor.x, scale_cursor.y);
+                            self.twist_points_cache.clear();
+                            (Status::Captured, None)
+                        } else {
+                            (Status::Ignored, None)
+                        }
+                    }
                     _ => (Status::Ignored, None),
                 }
             }
@@ -607,6 +654,9 @@ where
         let color_green = Color::from_rgba(0.2, 0.8, 0.2, 0.8);
         let color_blue = Color::from_rgba(0.2, 0.2, 0.8, 0.8);
         let draw = self.cache.draw(renderer, bounds.size(), |frame| {
+            if self.compute_solution.borrow().as_ref().is_none() {
+                return;
+            }
             *state.points.borrow_mut() = self
                 .draw_lines
                 .borrow()
@@ -622,7 +672,6 @@ where
                 .map(|item| Point::new(item.x, item.y))
                 .collect();
 
-            info!("cache refresh");
             *state.reference_cub_2d.borrow_mut() = self
                 .compute_solution
                 .borrow()
@@ -1272,16 +1321,114 @@ where
                 frame.stroke(
                     &path,
                     Stroke {
-                        style: canvas::Style::Solid(Color::from_rgba(0.9, 0.7, 0.7, 0.8)),
+                        style: canvas::Style::Solid(Color::from_rgba(0.9, 0.7, 0.7, 1.0)),
                         width: 1.0,
                         ..Stroke::default()
                     },
                 );
             });
 
+        let twist_point = self
+            .twist_points_cache
+            .draw(renderer, bounds.size(), |frame| {
+                let selected_color = match &state.edit_state {
+                    Edit::MarkError(_) => Color::from_rgba(0.8, 0.2, 0.2, 0.8),
+                    Edit::ControlPoint(_) => Color::from_rgba(0.8, 0.8, 0.2, 0.8),
+                    Edit::Draw => Color::from_rgba(0.8, 0.8, 0.2, 0.8),
+                    Edit::Extrude(_) => Color::from_rgba(0.8, 0.8, 0.8, 0.8),
+                    Edit::Scale(_) => Color::from_rgba(0.2, 0.8, 0.2, 0.8),
+                    Edit::None => Color::from_rgba(0.8, 0.8, 0.2, 0.8),
+                    _ => Color::from_rgba(0.8, 0.8, 0.2, 0.8),
+                };
+                if let Some(selected) = state.selected_match_point {
+                    if let Some(item) = self.twist_points_2d.borrow().get(selected) {
+                        let item =
+                            scale_point_to_canvas(&Point::new(item.x, item.y), bounds.size());
+                        let mut builder = canvas::path::Builder::new();
+                        builder.circle(item.clone(), 5.0);
+                        let path = builder.build();
+                        frame.fill_rectangle(
+                            Point::new(item.x + 2.0, item.y + 2.0),
+                            Size::new(120.0, 15.0),
+                            Fill {
+                                style: canvas::Style::Solid(Color::from_rgba(0.3, 0.3, 0.3, 0.9)),
+                                ..Fill::default()
+                            },
+                        );
+
+                        if let Some(twist_point) = self.twist_points.borrow().get(selected) {
+                            frame.fill_text(Text {
+                                content: format!(
+                                    "{:>7.3},{:>7.3},{:>7.3}",
+                                    twist_point.x, twist_point.y, twist_point.z
+                                ),
+                                position: Point::new(item.x + 4.0, item.y + 4.0),
+                                color: Color::from_rgba(0.8, 0.8, 0.8, 0.8),
+                                size: Pixels(10.0),
+                                ..Default::default()
+                            });
+                            frame.stroke(
+                                &path,
+                                Stroke {
+                                    style: canvas::Style::Solid(selected_color),
+                                    width: 2.0,
+                                    ..Stroke::default()
+                                },
+                            );
+                        }
+                    }
+                } else {
+                    self.twist_points_2d
+                        .borrow()
+                        .iter()
+                        .enumerate()
+                        .for_each(|(selected, item)| {
+                            let item =
+                                scale_point_to_canvas(&Point::new(item.x, item.y), bounds.size());
+                            let mut builder = canvas::path::Builder::new();
+                            builder.circle(item.clone(), 5.0);
+                            let path = builder.build();
+                            frame.fill_rectangle(
+                                Point::new(item.x + 2.0, item.y + 2.0),
+                                Size::new(120.0, 15.0),
+                                Fill {
+                                    style: canvas::Style::Solid(Color::from_rgba(
+                                        0.3, 0.3, 0.3, 0.9,
+                                    )),
+                                    ..Fill::default()
+                                },
+                            );
+
+                            if let Some(twist_point) = self.twist_points.borrow().get(selected) {
+                                frame.fill_text(Text {
+                                    content: format!(
+                                        "{:>7.3},{:>7.3},{:>7.3}",
+                                        twist_point.x, twist_point.y, twist_point.z
+                                    ),
+                                    position: Point::new(item.x + 4.0, item.y + 4.0),
+                                    color: Color::from_rgba(0.8, 0.8, 0.8, 0.8),
+                                    size: Pixels(10.0),
+                                    ..Default::default()
+                                });
+                                frame.stroke(
+                                    &path,
+                                    Stroke {
+                                        style: canvas::Style::Solid(selected_color),
+                                        width: 2.0,
+                                        ..Stroke::default()
+                                    },
+                                );
+                            }
+                        })
+                };
+            });
+
         match state.edit_state {
             Edit::None | Edit::VanishingPoint(_) | Edit::ControlPoint(_) => {
                 vec![vanishing_lines_cache, draw_lines_cache, draw, axis_cache]
+            }
+            Edit::Twist => {
+                vec![twist_point, draw_lines_cache, draw]
             }
             _ => vec![vanishing_lines_cache, draw_lines_cache, draw],
         }
@@ -1474,7 +1621,7 @@ where
 }
 
 impl<'a, Message, Theme, Renderer> Widget<Message, Theme, Renderer>
-    for ComputeCameraPoseAll<Message, Theme, Renderer>
+    for ComputeCameraPose<Message, Theme, Renderer>
 where
     Renderer: geometry::Renderer,
 {
@@ -1583,9 +1730,10 @@ pub struct State {
     pub captured: Option<Vector>,
     pub captured_delta: f32,
     pub vanishing_points: RefCell<(Vector2<f32>, Vector2<f32>, Vector2<f32>)>,
+    pub selected_match_point: Option<usize>,
 }
 
-impl<'a, Message, Theme, Renderer> From<ComputeCameraPoseAll<Message, Theme, Renderer>>
+impl<'a, Message, Theme, Renderer> From<ComputeCameraPose<Message, Theme, Renderer>>
     for Element<'a, Message, Theme, Renderer>
 where
     Message: 'a,
@@ -1593,7 +1741,7 @@ where
     Renderer: 'a + geometry::Renderer,
 {
     fn from(
-        axis_decoration: ComputeCameraPoseAll<Message, Theme, Renderer>,
+        axis_decoration: ComputeCameraPose<Message, Theme, Renderer>,
     ) -> Element<'a, Message, Theme, Renderer> {
         Element::new(axis_decoration)
     }

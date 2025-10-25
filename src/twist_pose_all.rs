@@ -1321,7 +1321,7 @@ where
                 frame.stroke(
                     &path,
                     Stroke {
-                        style: canvas::Style::Solid(Color::from_rgba(0.9, 0.7, 0.7, 0.8)),
+                        style: canvas::Style::Solid(Color::from_rgba(0.9, 0.7, 0.7, 1.0)),
                         width: 1.0,
                         ..Stroke::default()
                     },
