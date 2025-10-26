@@ -18,7 +18,6 @@ use iced::{
     widget::canvas::{self, Event, Fill, Stroke, Text},
 };
 use nalgebra::{Point2, Point3, Vector2};
-use tracing::info;
 
 use crate::{
     AxisData, Component,
@@ -152,7 +151,6 @@ where
         _cursor: mouse::Cursor,
     ) -> Vec<Renderer::Geometry> {
         let draw = self.cache.draw(renderer, bounds.size(), |frame| {
-            info!("check not to trigger");
             if self.compute_solution.borrow().as_ref().is_none() {
                 return;
             }
@@ -245,7 +243,7 @@ where
                             let path = builder.build();
                             frame.fill_rectangle(
                                 Point::new(item.x + 2.0, item.y + 2.0),
-                                Size::new(120.0, 15.0),
+                                Size::new(100.0, 15.0),
                                 Fill {
                                     style: canvas::Style::Solid(Color::from_rgba(
                                         0.3, 0.3, 0.3, 0.9,
@@ -257,7 +255,7 @@ where
                             if let Some(twist_point) = self.twist_points.borrow().get(selected) {
                                 frame.fill_text(Text {
                                     content: format!(
-                                        "{:>7.3},{:>7.3},{:>7.3}",
+                                        "{:>7.2},{:>7.2},{:>7.2}",
                                         twist_point.x, twist_point.y, twist_point.z
                                     ),
                                     position: Point::new(item.x + 4.0, item.y + 4.0),

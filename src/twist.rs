@@ -1,10 +1,7 @@
 use arrayvec::ArrayVec;
 use cv::{
-    Estimator, WorldPoint,
-    nalgebra::{
-        Isometry3, Matrix3, Perspective3, Point2, Point3, Rotation3, Translation3, Unit, Vector2,
-        Vector3,
-    },
+    Estimator,
+    nalgebra::{Matrix3, Rotation3, Vector3},
 };
 use cv_core::{Bearing, FeatureWorldMatch, Pose, Projective, WorldToCamera};
 use rand_distr::num_traits::Float;

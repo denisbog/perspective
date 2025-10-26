@@ -176,53 +176,52 @@ where
         );
 
         let state = tree.state.downcast_ref::<State>();
-        if state.is_zoom() {
-            if let Some(cursor) = cursor.position_over(bounds) {
-                let final_size = bounds.size() * self.scale;
-                let drawing_bounds = Rectangle::new(
-                    Point::new(
-                        bounds.center_x() - final_size.width / 2.0,
-                        bounds.center_y() - final_size.height / 2.0,
-                    ),
-                    final_size,
-                );
+        if state.is_zoom()
+            && let Some(cursor) = cursor.position_over(bounds)
+        {
+            let final_size = bounds.size() * self.scale;
+            let drawing_bounds = Rectangle::new(
+                Point::new(
+                    bounds.center_x() - final_size.width / 2.0,
+                    bounds.center_y() - final_size.height / 2.0,
+                ),
+                final_size,
+            );
 
-                let cursor_image_coordinates = bounds.center() - cursor;
-                let translation = Vector::new(
-                    (final_size.width * ((self.scale - 1.0) / self.scale))
-                        * cursor_image_coordinates.x
-                        / bounds.width,
-                    (final_size.height * ((self.scale - 1.0) / self.scale))
-                        * cursor_image_coordinates.y
-                        / bounds.height,
-                );
-                let render = |renderer: &mut Renderer| {
-                    // translation
-                    renderer.with_translation(translation, |renderer| {
-                        renderer.draw_image(
-                            image::Image {
-                                handle: self.handle.clone(),
-                                filter_method: self.filter_method,
-                                rotation: Radians(0.0),
-                                opacity: 1.0,
-                                snap: true,
-                            },
-                            drawing_bounds, //zooming
-                        );
-                    });
-                };
-                // clipping
-                renderer.with_layer(
-                    Rectangle::new(
-                        Point::new(
-                            cursor.x - self.zoomer_width / 2.0,
-                            cursor.y - self.zoomer_height / 2.0,
-                        ),
-                        Size::new(self.zoomer_width, self.zoomer_height),
+            let cursor_image_coordinates = bounds.center() - cursor;
+            let translation = Vector::new(
+                (final_size.width * ((self.scale - 1.0) / self.scale)) * cursor_image_coordinates.x
+                    / bounds.width,
+                (final_size.height * ((self.scale - 1.0) / self.scale))
+                    * cursor_image_coordinates.y
+                    / bounds.height,
+            );
+            let render = |renderer: &mut Renderer| {
+                // translation
+                renderer.with_translation(translation, |renderer| {
+                    renderer.draw_image(
+                        image::Image {
+                            handle: self.handle.clone(),
+                            filter_method: self.filter_method,
+                            rotation: Radians(0.0),
+                            opacity: 1.0,
+                            snap: true,
+                        },
+                        drawing_bounds, //zooming
+                    );
+                });
+            };
+            // clipping
+            renderer.with_layer(
+                Rectangle::new(
+                    Point::new(
+                        cursor.x - self.zoomer_width / 2.0,
+                        cursor.y - self.zoomer_height / 2.0,
                     ),
-                    render,
-                );
-            }
+                    Size::new(self.zoomer_width, self.zoomer_height),
+                ),
+                render,
+            );
         };
     }
 }

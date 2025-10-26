@@ -1,5 +1,5 @@
 use iced::{
-    Border, Color, Element, Event, Point, Rectangle, Shadow, Size,
+    Border, Color, Element, Event, Point, Shadow, Size,
     advanced::{
         Clipboard, Layout, Shell,
         graphics::core::window,

@@ -1,146 +1,114 @@
-use std::{cell::RefCell, rc::Rc};
-
 use iced::{
-    Element,
+    Background, Border, Element, Theme,
     alignment::Vertical,
-    widget::{column, row, text, text_input},
+    widget::{column, row, text_input},
 };
 use nalgebra::Point3;
 
 #[derive(Default)]
 pub struct EditorComponent {
-    pub twist_points: Rc<RefCell<Vec<Point3<f32>>>>,
+    label: &'static str,
+    value_x: String,
+    value_y: String,
+    value_z: String,
 }
 
-#[derive(Debug)]
-pub enum EditComponentMessage {
-    Edit1(Point3<f32>),
-    Edit2(Point3<f32>),
-    Edit3(Point3<f32>),
-    None,
+#[derive(Debug, Clone)]
+pub enum Message {
+    InternalEdit(usize, String),
 }
 
+#[derive(Debug, Clone)]
+pub enum Action {
+    Valid(Point3<f32>),
+    Invalid,
+}
 impl<'a> EditorComponent {
-    pub fn new(twist_points: Rc<RefCell<Vec<Point3<f32>>>>) -> Self {
-        Self { twist_points }
-    }
-    pub fn update<Message>(&mut self) -> Option<Message> {
-        None
-    }
-
-    fn handle_update<Message>(
-        &self,
-        index: usize,
-        component: usize,
-        input: String,
-        on_edit: &'a (impl Fn(EditComponentMessage) -> Message + 'a),
-    ) -> Message {
-        let input = if input.len() == 0 {
-            "0".to_string()
-        } else {
-            input
-        };
-        let input = if input.chars().last().unwrap() == '.' {
-            format!("{input}.0")
-        } else {
-            input
-        };
-        if let Ok(new) = input.parse::<f32>() {
-            match component {
-                1 => {
-                    self.twist_points.borrow_mut()[index].x = new;
-                    on_edit(EditComponentMessage::Edit1(
-                        self.twist_points.borrow()[index],
-                    ))
-                }
-                2 => {
-                    self.twist_points.borrow_mut()[index].y = new;
-                    on_edit(EditComponentMessage::Edit2(
-                        self.twist_points.borrow()[index],
-                    ))
-                }
-                3 => {
-                    self.twist_points.borrow_mut()[index].z = new;
-                    on_edit(EditComponentMessage::Edit3(
-                        self.twist_points.borrow()[index],
-                    ))
-                }
-                _ => on_edit(EditComponentMessage::None),
-            }
-        } else {
-            on_edit(EditComponentMessage::None)
+    pub fn new(label: &'static str, twist_point: &Point3<f32>) -> Self {
+        Self {
+            label,
+            value_x: EditorComponent::edit_string(twist_point.x),
+            value_y: EditorComponent::edit_string(twist_point.y),
+            value_z: EditorComponent::edit_string(twist_point.z),
         }
     }
 
-    pub fn view<Message>(
-        &'a self,
-        on_edit: &'a (impl Fn(EditComponentMessage) -> Message + 'a),
-    ) -> Element<'a, Message>
-    where
-        Message: Clone + 'a,
-    {
-        println!("rerender");
+    #[must_use]
+    pub fn update(&mut self, message: Message) -> Action {
+        match message {
+            Message::InternalEdit(component, input) => self.handle_update(component, input),
+        }
+    }
 
+    fn handle_update(&mut self, component: usize, input: String) -> Action {
+        match component {
+            1 => {
+                self.value_x = input.clone();
+            }
+            2 => {
+                self.value_y = input.clone();
+            }
+            3 => {
+                self.value_z = input.clone();
+            }
+            _ => {}
+        };
+        if let Ok(new) = input.parse::<f32>()
+            && self.value_x.parse::<f32>().is_ok()
+            && self.value_y.parse::<f32>().is_ok()
+            && self.value_z.parse::<f32>().is_ok()
+        {
+            match component {
+                1 => Action::Valid(Point3::new(
+                    new,
+                    self.value_y.parse().unwrap(),
+                    self.value_z.parse().unwrap(),
+                )),
+                2 => Action::Valid(Point3::new(
+                    self.value_x.parse().unwrap(),
+                    new,
+                    self.value_z.parse().unwrap(),
+                )),
+                3 => Action::Valid(Point3::new(
+                    self.value_x.parse().unwrap(),
+                    self.value_y.parse().unwrap(),
+                    new,
+                )),
+                _ => Action::Invalid,
+            }
+        } else {
+            Action::Invalid
+        }
+    }
+
+    pub fn view<M>(&'a self, on_edit: &'a (impl Fn(Message) -> M + 'a)) -> Element<'a, M>
+    where
+        M: Clone + 'a,
+    {
         column!(
             row!(
-                text!("Point #1"),
-                text_input(
-                    "x",
-                    &EditorComponent::edit_string(self.twist_points.borrow()[0].x)
-                )
-                .on_input(|action| { self.handle_update(0, 1, action, on_edit) }),
-                text_input(
-                    "z",
-                    &EditorComponent::edit_string(self.twist_points.borrow()[0].y)
-                )
-                .on_input(|action| { self.handle_update(0, 2, action, on_edit) }),
-                text_input(
-                    "z",
-                    &EditorComponent::edit_string(self.twist_points.borrow()[0].z)
-                )
-                .on_input(|action| { self.handle_update(0, 3, action, on_edit) }),
-            )
-            .align_y(Vertical::Center)
-            .padding(5.0)
-            .spacing(5.0),
-            row!(
-                text!("Point #2"),
-                text_input(
-                    "x",
-                    &EditorComponent::edit_string(self.twist_points.borrow()[1].x),
-                )
-                .on_input(|action| { self.handle_update(1, 1, action, on_edit) }),
-                text_input(
-                    "y",
-                    &EditorComponent::edit_string(self.twist_points.borrow()[1].y)
-                )
-                .on_input(|action| { self.handle_update(1, 2, action, on_edit) }),
-                text_input(
-                    "z",
-                    &EditorComponent::edit_string(self.twist_points.borrow()[1].z)
-                )
-                .on_input(|action| { self.handle_update(1, 3, action, on_edit) }),
-            )
-            .align_y(Vertical::Center)
-            .padding(5.0)
-            .spacing(5.0),
-            row!(
-                text!("Point #3"),
-                text_input(
-                    "x",
-                    &EditorComponent::edit_string(self.twist_points.borrow()[2].x)
-                )
-                .on_input(|action| { self.handle_update(2, 1, action, on_edit) }),
-                text_input(
-                    "y",
-                    &EditorComponent::edit_string(self.twist_points.borrow()[2].y)
-                )
-                .on_input(|action| { self.handle_update(2, 2, action, on_edit) }),
-                text_input(
-                    "z",
-                    &EditorComponent::edit_string(self.twist_points.borrow()[2].z)
-                )
-                .on_input(|action| { self.handle_update(2, 3, action, on_edit) }),
+                self.label,
+                text_input("x", &self.value_x)
+                    .on_input(|input| on_edit(Message::InternalEdit(1, input)))
+                    .style(|theme, status| EditorComponent::get_style(
+                        &self.value_x,
+                        theme,
+                        status
+                    )),
+                text_input("y", &self.value_y)
+                    .on_input(|input| on_edit(Message::InternalEdit(2, input)))
+                    .style(|theme, status| EditorComponent::get_style(
+                        &self.value_y,
+                        theme,
+                        status
+                    )),
+                text_input("z", &self.value_z)
+                    .on_input(|input| on_edit(Message::InternalEdit(3, input)))
+                    .style(|theme, status| EditorComponent::get_style(
+                        &self.value_z,
+                        theme,
+                        status
+                    )),
             )
             .align_y(Vertical::Center)
             .padding(5.0)
@@ -154,6 +122,27 @@ impl<'a> EditorComponent {
             "0.0".to_string()
         } else {
             format!("{value:.2}")
+        }
+    }
+
+    fn get_style(input: &str, theme: &Theme, _status: text_input::Status) -> text_input::Style {
+        let palette = theme.extended_palette();
+        let border_color = if input.parse::<f32>().is_ok() {
+            palette.background.strong.color
+        } else {
+            palette.danger.strong.color
+        };
+        text_input::Style {
+            background: Background::Color(palette.background.base.color),
+            border: Border {
+                radius: 2.0.into(),
+                width: 1.0,
+                color: border_color,
+            },
+            icon: palette.background.weak.text,
+            placeholder: palette.secondary.base.color,
+            value: palette.background.base.text,
+            selection: palette.primary.weak.color,
         }
     }
 }

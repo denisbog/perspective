@@ -18,7 +18,7 @@ use tokio_util::{bytes::BytesMut, codec::Encoder};
 
 use crate::{
     AxisData, FSpyData, SceneSettings, encoder::FSpyEncoder,
-    fspy::compute_solution_to_scene_settings, twist_point, utils::relative_to_image_plane,
+    fspy::compute_solution_to_scene_settings, utils::relative_to_image_plane,
 };
 
 #[derive(Serialize, Deserialize)]

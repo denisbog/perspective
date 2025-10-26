@@ -33,7 +33,7 @@ use std::rc::Rc;
 use tracing::{info, trace};
 use tracing_subscriber::EnvFilter;
 use zoomer::context_menu::ContextMenu;
-use zoomer::editor_component::{EditComponentMessage, EditorComponent};
+use zoomer::editor_component::{Action, EditorComponent};
 
 use anyhow::Result;
 
@@ -116,7 +116,7 @@ enum Message {
     PoseLambdaTwist,
     OptimizeY,
     CalculatePoseUsingVanishingPoint,
-    Edit(TwistPointEdit),
+    EditPoint(usize, zoomer::editor_component::Message),
 }
 
 #[derive(Default)]
@@ -140,7 +140,9 @@ struct Perspective {
     dimension: Option<f32>,
     twist_points: Rc<RefCell<Vec<Point3<f32>>>>,
     twist_points_2d: Rc<RefCell<Vec<Point2<f32>>>>,
-    editor_component: EditorComponent,
+    editor_component_1: EditorComponent,
+    editor_component_2: EditorComponent,
+    editor_component_3: EditorComponent,
     field_of_view: f32,
 }
 
@@ -185,7 +187,12 @@ impl Perspective {
             Point2::new(0.5, 0.5),
         ]));
 
-        let editor_component = EditorComponent::new(twist_points.clone());
+        let editor_component_1 =
+            EditorComponent::new("Point #1", &twist_points.borrow().get(0).unwrap());
+        let editor_component_2 =
+            EditorComponent::new("Point #2", &twist_points.borrow().get(1).unwrap());
+        let editor_component_3 =
+            EditorComponent::new("Point #3", &twist_points.borrow().get(2).unwrap());
         let init = Perspective {
             image_path: first_image.clone(),
             draw_lines,
@@ -197,7 +204,9 @@ impl Perspective {
             dimension,
             twist_points,
             twist_points_2d,
-            editor_component,
+            editor_component_1,
+            editor_component_2,
+            editor_component_3,
             field_of_view: 102.0,
             ..Self::default()
         };
@@ -432,7 +441,12 @@ impl Perspective {
 
                 *self.reference_cube.borrow_mut() = reference_cube;
 
-                self.editor_component = EditorComponent::new(self.twist_points.clone());
+                self.editor_component_1 =
+                    EditorComponent::new("Point #1", &self.twist_points.borrow().get(0).unwrap());
+                self.editor_component_2 =
+                    EditorComponent::new("Point #2", &self.twist_points.borrow().get(1).unwrap());
+                self.editor_component_3 =
+                    EditorComponent::new("Point #3", &self.twist_points.borrow().get(2).unwrap());
                 // self.update(Message::CalculatePoseUsingVanishingPoint);
                 self.update(Message::PoseLambdaTwist);
             }
@@ -806,9 +820,30 @@ impl Perspective {
                 //     info!("no solution found");
                 // }
             }
-            Message::Edit(point) => {
-                info!("insert {point:?}")
-            }
+            Message::EditPoint(index, edit_component_message) => match index {
+                0 => match self.editor_component_1.update(edit_component_message) {
+                    Action::Valid(point) => {
+                        self.twist_points.borrow_mut()[index] = point;
+                    }
+
+                    Action::Invalid => {}
+                },
+                1 => match self.editor_component_2.update(edit_component_message) {
+                    Action::Valid(point) => {
+                        self.twist_points.borrow_mut()[index] = point;
+                    }
+
+                    Action::Invalid => {}
+                },
+                2 => match self.editor_component_3.update(edit_component_message) {
+                    Action::Valid(point) => {
+                        self.twist_points.borrow_mut()[index] = point;
+                    }
+
+                    Action::Invalid => {}
+                },
+                _ => {}
+            },
         }
     }
     fn view(&self) -> Element<'_, Message> {
@@ -997,28 +1032,12 @@ impl Perspective {
                             Message::FieldOfViewChanged
                         )
                         .step(0.1),
-                        self.editor_component.view(
-                            &(|action| {
-                                match action {
-                                    EditComponentMessage::Edit1(edit) => {
-                                        Message::Edit(TwistPointEdit::Point1(edit))
-                                    }
-
-                                    EditComponentMessage::Edit2(edit) => {
-                                        Message::Edit(TwistPointEdit::Point2(edit))
-                                    }
-
-                                    EditComponentMessage::Edit3(edit) => {
-                                        Message::Edit(TwistPointEdit::Point3(edit))
-                                    }
-
-                                    EditComponentMessage::None => {
-                                        Message::Edit(TwistPointEdit::None)
-                                    }
-                                }
-                            })
-                        ),
-                        //  twist_editor(&self.edit, |action| { Message::Edit('a') }),
+                        self.editor_component_1
+                            .view(&move |action| Message::EditPoint(0, action)),
+                        self.editor_component_2
+                            .view(&move |action| Message::EditPoint(1, action)),
+                        self.editor_component_3
+                            .view(&move |action| Message::EditPoint(2, action)),
                     ))
                     .padding(20),
                     scrollable(
