@@ -1,12 +1,12 @@
 use clap::Parser;
 use cv::FeatureWorldMatch;
-use iced::Alignment::Center;
+use iced::Alignment::{self};
 use iced::Length::Fill;
 use iced::alignment::{Horizontal, Vertical};
 use iced::futures::executor::block_on;
 use iced::widget::scrollable::{Direction, Scrollbar};
 use iced::widget::{
-    center, column, container, image, mouse_area, row, scrollable, slider, stack, text,
+    button, center, column, container, image, mouse_area, row, scrollable, slider, stack, text,
 };
 use iced::{Element, Length, Point, Size, Task, Theme, keyboard};
 use nalgebra::{Matrix4, Point2, Point3, Vector2, Vector3};
@@ -44,7 +44,7 @@ struct Cli {
     points: Option<String>,
     #[arg(short, long)]
     dimension: Option<f32>,
-    #[arg(short, long, value_delimiter = ' ', num_args = 1.., default_value = "perspective.jpg")]
+    #[arg(short, long, value_delimiter = ' ', num_args = 0..)]
     images: Vec<String>,
 }
 
@@ -117,10 +117,17 @@ enum Message {
     OptimizeY,
     CalculatePoseUsingVanishingPoint,
     EditPoint(usize, zoomer::editor_component::Message),
+    LoadImage,
+    NoImage,
 }
 
 #[derive(Default)]
 struct Perspective {
+    image_state: Option<ImageState>,
+}
+
+#[derive(Default)]
+struct ImageState {
     axis_data: Option<Rc<RefCell<AxisData>>>,
     image_path: String,
     points_file_name: String,
@@ -157,90 +164,103 @@ fn extract_state(state: Result<(Option<ImageData>, Size<u32>)>) -> Message {
 impl Perspective {
     fn new() -> (Self, Task<Message>) {
         let args = Cli::parse();
-        trace!("args {:?}", args);
-        let draw_lines = Rc::new(RefCell::new(vec![Vector3::<f32>::zeros()]));
-        let first_image = args.images.first().unwrap().clone();
-        let image_name = Path::new(&first_image)
-            .file_stem()
-            .unwrap()
-            .to_str()
-            .unwrap();
-        let points = if args.points.is_none() {
-            let parent = Path::new(&first_image).parent().unwrap().to_str().unwrap();
-            format!("{parent}/{image_name}.points")
+        if let Some(first_image) = args.images.first() {
+            let first_image = first_image.clone();
+            let draw_lines = Rc::new(RefCell::new(vec![Vector3::<f32>::zeros()]));
+            let image_name = Path::new(&first_image)
+                .file_stem()
+                .unwrap()
+                .to_str()
+                .unwrap();
+            let points = if args.points.is_none() {
+                let parent = Path::new(&first_image).parent().unwrap().to_str().unwrap();
+                format!("{parent}/{image_name}.points")
+            } else {
+                args.points.unwrap()
+            };
+            let export_file_name = format!("{}.fspy", image_name);
+            let dimension = args.dimension;
+            let reference_cub = Rc::new(RefCell::new(vec![Point3::<f32>::new(0.0, 0.0, 0.0)]));
+
+            let twist_points = Rc::new(RefCell::new(vec![
+                Point3::new(7.54, 0.0, 0.0),
+                Point3::new(3.14, 0.0, 2.4),
+                Point3::new(3.57, 3.61, 0.0),
+            ]));
+
+            let twist_points_2d = Rc::new(RefCell::new(vec![
+                Point2::new(0.5, 0.5),
+                Point2::new(0.5, 0.5),
+                Point2::new(0.5, 0.5),
+            ]));
+
+            let editor_component_1 =
+                EditorComponent::new("Point #1", &twist_points.borrow().get(0).unwrap());
+            let editor_component_2 =
+                EditorComponent::new("Point #2", &twist_points.borrow().get(1).unwrap());
+            let editor_component_3 =
+                EditorComponent::new("Point #3", &twist_points.borrow().get(2).unwrap());
+            let image_state = ImageState {
+                image_path: first_image.clone(),
+                draw_lines,
+                reference_cube: reference_cub,
+                images: args.images,
+                export_file_name,
+                points_file_name: points.clone(),
+                zoom: 0.5,
+                dimension,
+                twist_points,
+                twist_points_2d,
+                editor_component_1,
+                editor_component_2,
+                editor_component_3,
+                field_of_view: 102.0,
+                ..ImageState::default()
+            };
+            let init = Perspective {
+                image_state: Some(image_state),
+            };
+            (
+                init,
+                Task::perform(load(first_image, points, true), extract_state),
+            )
         } else {
-            args.points.unwrap()
-        };
-        let export_file_name = format!("{}.fspy", image_name);
-        let dimension = args.dimension;
-        let reference_cub = Rc::new(RefCell::new(vec![Point3::<f32>::new(0.0, 0.0, 0.0)]));
-
-        let twist_points = Rc::new(RefCell::new(vec![
-            Point3::new(7.54, 0.0, 0.0),
-            Point3::new(3.14, 0.0, 2.4),
-            Point3::new(3.57, 3.61, 0.0),
-        ]));
-
-        let twist_points_2d = Rc::new(RefCell::new(vec![
-            Point2::new(0.5, 0.5),
-            Point2::new(0.5, 0.5),
-            Point2::new(0.5, 0.5),
-        ]));
-
-        let editor_component_1 =
-            EditorComponent::new("Point #1", &twist_points.borrow().get(0).unwrap());
-        let editor_component_2 =
-            EditorComponent::new("Point #2", &twist_points.borrow().get(1).unwrap());
-        let editor_component_3 =
-            EditorComponent::new("Point #3", &twist_points.borrow().get(2).unwrap());
-        let init = Perspective {
-            image_path: first_image.clone(),
-            draw_lines,
-            reference_cube: reference_cub,
-            images: args.images,
-            export_file_name,
-            points_file_name: points.clone(),
-            zoom: 0.5,
-            dimension,
-            twist_points,
-            twist_points_2d,
-            editor_component_1,
-            editor_component_2,
-            editor_component_3,
-            field_of_view: 102.0,
-            ..Self::default()
-        };
-        (
-            init,
-            Task::perform(load(first_image, points, true), extract_state),
-        )
+            let init = Perspective::default();
+            (init, Task::done(Message::NoImage))
+        }
     }
 
     fn update(&mut self, message: Message) {
         match message {
             Message::Save => {
-                if !Path::new(&self.points_file_name).exists() {
-                    trace!("create file {}", self.points_file_name);
-                }
-                let mut file = File::create(self.points_file_name.clone()).unwrap();
-                if self.axis_data.is_none() {
+                if self.image_state.as_ref().unwrap().axis_data.is_none() {
                     return;
                 };
+                if !Path::new(&self.image_state.as_ref().unwrap().points_file_name).exists() {
+                    trace!(
+                        "create file {}",
+                        self.image_state.as_ref().unwrap().points_file_name
+                    );
+                }
+                let mut file =
+                    File::create(self.image_state.as_ref().unwrap().points_file_name.clone())
+                        .unwrap();
                 let out = <Lines as From<&Perspective>>::from(self);
                 file.write_all(&serde_json::to_vec(&out).unwrap()).unwrap();
             }
             Message::LoadLines => {
-                if self.axis_data.is_none() {
+                if self.image_state.as_ref().unwrap().axis_data.is_none() {
                     return;
                 };
-                if let Ok((_, Some(lines))) = read_points_from_file(&self.points_file_name.clone())
-                {
-                    *self.draw_lines.borrow_mut() = lines;
+                if let Ok((_, Some(lines))) = read_points_from_file(
+                    &self.image_state.as_ref().unwrap().points_file_name.clone(),
+                ) {
+                    *self.image_state.as_ref().unwrap().draw_lines.borrow_mut() = lines;
                 };
             }
             Message::CalculatePose => {
                 info!("does nothing");
-                // let Some(axis_data) = &self.axis_data else {
+                // let Some(axis_data) = &self.image_state.unwrap().axis_data else {
                 //     return;
                 // };
                 // let lines_x = [
@@ -256,12 +276,12 @@ impl Perspective {
                 //     axis_data.borrow().axis_lines[5],
                 // ];
                 // let control_point = &axis_data.borrow().control_point;
-                // self.compute_solution = Some(
+                // self.image_state.unwrap().compute_solution = Some(
                 //     compute_ui_adapter(
                 //         lines_x,
                 //         lines_y,
                 //         lines_z,
-                //         self.image_size,
+                //         self.image_state.unwrap().image_size,
                 //         control_point,
                 //         axis_data.borrow().flip,
                 //         &axis_data.borrow().custom_origin_translation,
@@ -271,7 +291,7 @@ impl Perspective {
                 // );
             }
             Message::CalculatePoseUsingVanishingPoint => {
-                let Some(axis_data) = &self.axis_data else {
+                let Some(axis_data) = &self.image_state.as_ref().unwrap().axis_data else {
                     return;
                 };
                 let lines_x = [
@@ -286,58 +306,88 @@ impl Perspective {
                     axis_data.borrow().axis_lines[4],
                     axis_data.borrow().axis_lines[5],
                 ];
-                let control_point = &axis_data.borrow().control_point;
-                self.compute_solution = Some(
+                let compute_solution = Some(
                     compute_ui_adapter(
                         lines_x,
                         lines_y,
                         lines_z,
-                        self.image_size,
-                        control_point,
+                        self.image_state.as_ref().unwrap().image_size,
+                        &axis_data.borrow().control_point,
                         axis_data.borrow().flip,
                         &axis_data.borrow().custom_origin_translation,
                         &axis_data.borrow().custom_scale,
                     )
                     .unwrap(),
                 );
+                self.image_state.as_mut().unwrap().compute_solution = compute_solution;
             }
             Message::ScaleToDimension => {
-                if self.compute_solution.is_some() {
-                    let Some(custom_scale) = self.custom_scale.borrow().clone() else {
+                if self
+                    .image_state
+                    .as_ref()
+                    .unwrap()
+                    .compute_solution
+                    .is_some()
+                {
+                    let Some(custom_scale) = self
+                        .image_state
+                        .as_ref()
+                        .unwrap()
+                        .custom_scale
+                        .borrow()
+                        .clone()
+                    else {
                         return;
                     };
-                    let solution = self.compute_solution.clone().unwrap();
-                    self.compute_solution = if let Some(scale) = self.dimension {
-                        let scale =
-                            (custom_scale.source_vector - custom_scale.vector).norm() / scale;
-                        *self.custom_scale.borrow_mut() = None;
-                        self.axis_data
-                            .as_mut()
-                            .unwrap()
-                            .borrow_mut()
-                            .custom_scale
-                            .replace(scale);
-                        compute_camera_pose_scale(solution, scale).ok()
-                    } else {
-                        Some(solution)
-                    };
+                    let solution = self
+                        .image_state
+                        .as_ref()
+                        .unwrap()
+                        .compute_solution
+                        .clone()
+                        .unwrap();
+                    self.image_state.as_mut().unwrap().compute_solution =
+                        if let Some(scale) = self.image_state.as_ref().unwrap().dimension {
+                            let scale =
+                                (custom_scale.source_vector - custom_scale.vector).norm() / scale;
+                            *self.image_state.as_ref().unwrap().custom_scale.borrow_mut() = None;
+                            self.image_state
+                                .as_mut()
+                                .unwrap()
+                                .axis_data
+                                .as_mut()
+                                .unwrap()
+                                .borrow_mut()
+                                .custom_scale
+                                .replace(scale);
+                            compute_camera_pose_scale(solution, scale).ok()
+                        } else {
+                            Some(solution)
+                        };
                 };
             }
             Message::LoadApplicationState {
                 image_data,
                 image_size,
             } => {
-                self.image_size = Size::new(image_size.width as f32, image_size.height as f32);
+                self.image_state.as_mut().unwrap().image_size =
+                    Size::new(image_size.width as f32, image_size.height as f32);
                 if let Some(image_data) = image_data {
-                    self.axis_data = Some(Rc::new(RefCell::new(image_data.axis_data)));
+                    self.image_state.as_mut().unwrap().axis_data =
+                        Some(Rc::new(RefCell::new(image_data.axis_data)));
                     if let Some(lines) = image_data.lines {
-                        self.draw_lines = Rc::new(RefCell::new(lines));
+                        self.image_state.as_mut().unwrap().draw_lines =
+                            Rc::new(RefCell::new(lines));
                     }
                 } else {
-                    self.axis_data = Some(Rc::new(RefCell::new(AxisData::default())));
+                    self.image_state.as_mut().unwrap().axis_data =
+                        Some(Rc::new(RefCell::new(AxisData::default())));
                 }
-                self.twist_points = Rc::new(RefCell::new(
-                    self.axis_data
+                self.image_state.as_ref().unwrap().twist_points.replace(
+                    self.image_state
+                        .as_ref()
+                        .unwrap()
+                        .axis_data
                         .as_ref()
                         .unwrap()
                         .borrow()
@@ -345,9 +395,12 @@ impl Perspective {
                         .as_ref()
                         .unwrap()
                         .clone(),
-                ));
-                self.twist_points_2d = Rc::new(RefCell::new(
-                    self.axis_data
+                );
+                self.image_state.as_ref().unwrap().twist_points_2d.replace(
+                    self.image_state
+                        .as_ref()
+                        .unwrap()
+                        .axis_data
                         .as_ref()
                         .unwrap()
                         .borrow()
@@ -355,16 +408,34 @@ impl Perspective {
                         .as_ref()
                         .unwrap()
                         .clone(),
-                ));
-                self.field_of_view = if let Some(field_of_view) =
-                    self.axis_data.as_ref().unwrap().borrow().field_of_view
+                );
+                self.image_state.as_mut().unwrap().field_of_view = if let Some(field_of_view) = self
+                    .image_state
+                    .as_ref()
+                    .unwrap()
+                    .axis_data
+                    .as_ref()
+                    .unwrap()
+                    .borrow()
+                    .field_of_view
                 {
                     field_of_view
                 } else {
                     102.0
                 };
-                let first = self.twist_points.borrow().first().unwrap().clone();
+                let first = self
+                    .image_state
+                    .as_ref()
+                    .unwrap()
+                    .twist_points
+                    .borrow()
+                    .first()
+                    .unwrap()
+                    .clone();
                 let min = self
+                    .image_state
+                    .as_ref()
+                    .unwrap()
                     .twist_points
                     .borrow()
                     .iter()
@@ -381,8 +452,19 @@ impl Perspective {
                         }
                         acc
                     });
-                let first = self.twist_points.borrow().first().unwrap().clone();
+                let first = self
+                    .image_state
+                    .as_ref()
+                    .unwrap()
+                    .twist_points
+                    .borrow()
+                    .first()
+                    .unwrap()
+                    .clone();
                 let max = self
+                    .image_state
+                    .as_ref()
+                    .unwrap()
                     .twist_points
                     .borrow()
                     .iter()
@@ -439,29 +521,45 @@ impl Perspective {
                     .iter_mut()
                     .for_each(|item| item.coords += min.coords);
 
-                *self.reference_cube.borrow_mut() = reference_cube;
-
-                self.editor_component_1 =
-                    EditorComponent::new("Point #1", &self.twist_points.borrow().get(0).unwrap());
-                self.editor_component_2 =
-                    EditorComponent::new("Point #2", &self.twist_points.borrow().get(1).unwrap());
-                self.editor_component_3 =
-                    EditorComponent::new("Point #3", &self.twist_points.borrow().get(2).unwrap());
-                // self.update(Message::CalculatePoseUsingVanishingPoint);
+                self.image_state
+                    .as_mut()
+                    .unwrap()
+                    .reference_cube
+                    .replace(reference_cube);
+                let twist_points = self
+                    .image_state
+                    .as_ref()
+                    .unwrap()
+                    .twist_points
+                    .borrow()
+                    .clone();
+                let point = twist_points.get(0).unwrap();
+                self.image_state.as_mut().unwrap().editor_component_1 =
+                    EditorComponent::new("Point #1", &point);
+                let point = twist_points.get(1).unwrap();
+                self.image_state.as_mut().unwrap().editor_component_2 =
+                    EditorComponent::new("Point #2", point);
+                let point = twist_points.get(2).unwrap();
+                self.image_state.as_mut().unwrap().editor_component_3 =
+                    EditorComponent::new("Point #3", point);
+                // self.image_state.unwrap().update(Message::CalculatePoseUsingVanishingPoint);
                 self.update(Message::PoseLambdaTwist);
             }
             Message::ChangeMode(mode) => {
-                self.mode = mode;
+                self.image_state.as_mut().unwrap().mode = mode;
             }
             Message::SelectImage(selected) => {
                 self.update(Message::Save);
-                self.selected_image = selected;
+                self.image_state.as_mut().unwrap().selected_image = selected;
                 let selected_image_name = self
+                    .image_state
+                    .as_ref()
+                    .unwrap()
                     .images
-                    .get(self.selected_image as usize)
+                    .get(self.image_state.as_ref().unwrap().selected_image as usize)
                     .unwrap()
                     .clone();
-                self.image_path = selected_image_name.clone();
+                self.image_state.as_mut().unwrap().image_path = selected_image_name.clone();
                 let name_without_extension = Path::new(&selected_image_name)
                     .file_stem()
                     .unwrap()
@@ -472,27 +570,42 @@ impl Perspective {
                     .unwrap()
                     .to_str()
                     .unwrap();
-                self.points_file_name = format!("{parent}/{name_without_extension}.points");
-                self.export_file_name = format!("{}.fspy", name_without_extension);
+                self.image_state.as_mut().unwrap().points_file_name =
+                    format!("{parent}/{name_without_extension}.points");
+                self.image_state.as_mut().unwrap().export_file_name =
+                    format!("{parent}/{}.fspy", name_without_extension);
 
                 self.update(extract_state(block_on(async {
-                    load(selected_image_name, self.points_file_name.clone(), false).await
+                    load(
+                        selected_image_name,
+                        self.image_state.as_ref().unwrap().points_file_name.clone(),
+                        false,
+                    )
+                    .await
                 })));
                 self.update(Message::CalculatePose);
             }
             Message::Flip(flip_x, flip_y, flip_z) => {
-                let Some(axis_data) = &self.axis_data else {
+                let Some(axis_data) = &self.image_state.as_ref().unwrap().axis_data else {
                     return;
                 };
                 axis_data.borrow_mut().flip = (flip_x, flip_y, flip_z);
                 self.update(Message::CalculatePoseUsingVanishingPoint);
             }
             Message::ApplyTranslation => {
-                let Some(custom_origin_translation) = *self.custom_origin_translation.borrow()
+                let Some(custom_origin_translation) = *self
+                    .image_state
+                    .as_ref()
+                    .unwrap()
+                    .custom_origin_translation
+                    .borrow()
                 else {
                     return;
                 };
-                self.axis_data
+                self.image_state
+                    .as_ref()
+                    .unwrap()
+                    .axis_data
                     .as_ref()
                     .unwrap()
                     .borrow_mut()
@@ -500,22 +613,44 @@ impl Perspective {
                 self.update(Message::CalculatePoseUsingVanishingPoint);
             }
             Message::ResetTranslation => {
-                let Some(axis_data) = &self.axis_data else {
+                let Some(axis_data) = &self.image_state.as_ref().unwrap().axis_data else {
                     return;
                 };
                 axis_data.borrow_mut().custom_origin_translation = None;
                 self.update(Message::CalculatePoseUsingVanishingPoint);
             }
             Message::ApplyScale => {
-                let Some(custom_scale) = self.custom_scale.borrow().clone() else {
+                let Some(custom_scale) = self
+                    .image_state
+                    .as_ref()
+                    .unwrap()
+                    .custom_scale
+                    .borrow()
+                    .clone()
+                else {
                     return;
                 };
                 let custom_scale = custom_scale.vector - custom_scale.source_vector;
 
-                let scale = if let Some(custom_scale_segment) = *self.custom_scale_segment.borrow()
+                let scale = if let Some(custom_scale_segment) = *self
+                    .image_state
+                    .as_ref()
+                    .unwrap()
+                    .custom_scale_segment
+                    .borrow()
                 {
-                    let start = *self.draw_lines.borrow().get(custom_scale_segment).unwrap();
+                    let start = *self
+                        .image_state
+                        .as_ref()
+                        .unwrap()
+                        .draw_lines
+                        .borrow()
+                        .get(custom_scale_segment)
+                        .unwrap();
                     let end = *self
+                        .image_state
+                        .as_ref()
+                        .unwrap()
                         .draw_lines
                         .borrow()
                         .get(custom_scale_segment + 1)
@@ -526,43 +661,71 @@ impl Perspective {
                     1.0
                 };
                 let scale = custom_scale.norm() / scale;
-                let scale = if let Some(prev_scale) =
-                    self.axis_data.as_ref().unwrap().borrow().custom_scale
+                let scale = if let Some(prev_scale) = self
+                    .image_state
+                    .as_ref()
+                    .unwrap()
+                    .axis_data
+                    .as_ref()
+                    .unwrap()
+                    .borrow()
+                    .custom_scale
                 {
                     prev_scale * scale
                 } else {
                     scale
                 };
-                self.axis_data.as_ref().unwrap().borrow_mut().custom_scale = Some(scale);
-                self.custom_scale.replace(None);
-                self.custom_scale_segment.replace(None);
+                self.image_state
+                    .as_ref()
+                    .unwrap()
+                    .axis_data
+                    .as_ref()
+                    .unwrap()
+                    .borrow_mut()
+                    .custom_scale = Some(scale);
+                self.image_state
+                    .as_ref()
+                    .unwrap()
+                    .custom_scale
+                    .replace(None);
+                self.image_state
+                    .as_ref()
+                    .unwrap()
+                    .custom_scale_segment
+                    .replace(None);
                 self.update(Message::CalculatePoseUsingVanishingPoint);
             }
             Message::ResetScale => {
-                let Some(axis_data) = &self.axis_data else {
+                let Some(axis_data) = &self.image_state.as_ref().unwrap().axis_data else {
                     return;
                 };
                 axis_data.borrow_mut().custom_scale = None;
                 self.update(Message::CalculatePoseUsingVanishingPoint);
             }
             Message::ExportToFSpy => {
-                let Some(compute_solution) = &self.compute_solution else {
+                let Some(compute_solution) = &self.image_state.as_ref().unwrap().compute_solution
+                else {
                     return;
                 };
+
+                trace!(
+                    "export to file {}",
+                    self.image_state.as_ref().unwrap().export_file_name.clone()
+                );
                 block_on(async {
                     let data = store_scene_data_to_file(
                         compute_solution,
-                        self.image_size.width as u32,
-                        self.image_size.height as u32,
-                        self.image_path.clone(),
-                        self.export_file_name.clone(),
+                        self.image_state.as_ref().unwrap().image_size.width as u32,
+                        self.image_state.as_ref().unwrap().image_size.height as u32,
+                        self.image_state.as_ref().unwrap().image_path.clone(),
+                        self.image_state.as_ref().unwrap().export_file_name.clone(),
                     )
                     .await;
                     trace!("scene data: {:?}", data);
                 });
             }
             Message::Optimize => {
-                let Some(axis_data) = &self.axis_data else {
+                let Some(axis_data) = &self.image_state.as_ref().unwrap().axis_data else {
                     return;
                 };
                 let lines = axis_data
@@ -572,9 +735,11 @@ impl Perspective {
                     .cloned()
                     .flat_map(|(a, b)| [Vector2::new(a.x, a.y), Vector2::new(b.x, b.y)])
                     .collect();
-                if let Ok(lines) =
-                    ortho_center_optimize(self.image_size.width / self.image_size.height, lines)
-                {
+                if let Ok(lines) = ortho_center_optimize(
+                    self.image_state.as_ref().unwrap().image_size.width
+                        / self.image_state.as_ref().unwrap().image_size.height,
+                    lines,
+                ) {
                     axis_data.borrow_mut().axis_lines = lines
                         .chunks(2)
                         .map(|items| {
@@ -588,7 +753,7 @@ impl Perspective {
                 };
             }
             Message::OptimizeX => {
-                let Some(axis_data) = &self.axis_data else {
+                let Some(axis_data) = &self.image_state.as_ref().unwrap().axis_data else {
                     return;
                 };
                 let lines = axis_data
@@ -598,9 +763,11 @@ impl Perspective {
                     .cloned()
                     .flat_map(|(a, b)| [Vector2::new(a.x, a.y), Vector2::new(b.x, b.y)])
                     .collect();
-                if let Ok(lines) =
-                    ortho_center_optimize_x(self.image_size.width / self.image_size.height, lines)
-                {
+                if let Ok(lines) = ortho_center_optimize_x(
+                    self.image_state.as_ref().unwrap().image_size.width
+                        / self.image_state.as_ref().unwrap().image_size.height,
+                    lines,
+                ) {
                     axis_data.borrow_mut().axis_lines = lines
                         .chunks(2)
                         .map(|items| {
@@ -614,7 +781,7 @@ impl Perspective {
                 };
             }
             Message::OptimizeY => {
-                let Some(axis_data) = &self.axis_data else {
+                let Some(axis_data) = &self.image_state.as_ref().unwrap().axis_data else {
                     return;
                 };
                 let lines = axis_data
@@ -624,9 +791,11 @@ impl Perspective {
                     .cloned()
                     .flat_map(|(a, b)| [Vector2::new(a.x, a.y), Vector2::new(b.x, b.y)])
                     .collect();
-                if let Ok(lines) =
-                    ortho_center_optimize_y(self.image_size.width / self.image_size.height, lines)
-                {
+                if let Ok(lines) = ortho_center_optimize_y(
+                    self.image_state.as_ref().unwrap().image_size.width
+                        / self.image_state.as_ref().unwrap().image_size.height,
+                    lines,
+                ) {
                     axis_data.borrow_mut().axis_lines = lines
                         .chunks(2)
                         .map(|items| {
@@ -640,10 +809,11 @@ impl Perspective {
                 };
             }
             Message::OptimizeForError => {
-                let Some(axis_data) = &self.axis_data else {
+                let Some(axis_data) = &self.image_state.as_ref().unwrap().axis_data else {
                     return;
                 };
-                let ratio = self.image_size.width / self.image_size.height;
+                let ratio = self.image_state.as_ref().unwrap().image_size.width
+                    / self.image_state.as_ref().unwrap().image_size.height;
                 let axis_lines = axis_data
                     .borrow()
                     .axis_lines
@@ -662,7 +832,7 @@ impl Perspective {
                     .borrow()
                     .custom_origin_translation
                     .unwrap_or_default();
-                //let draw_lines = self.draw_lines.borrow().to_vec();
+                //let draw_lines = self.image_state.unwrap().draw_lines.borrow().to_vec();
                 let scale = axis_data.borrow().custom_scale.unwrap_or(1.0) as f64;
                 if let Ok(lines) = pose_optimize(
                     ratio,
@@ -671,9 +841,14 @@ impl Perspective {
                     control_point,
                     flip,
                     custom_translation,
-                    //*self.custom_scale_segment.borrow(),
-                    //self.custom_scale.borrow().clone(),
-                    self.custom_error.borrow().clone(),
+                    //*self.image_state.unwrap().custom_scale_segment.borrow(),
+                    //self.image_state.unwrap().custom_scale.borrow().clone(),
+                    self.image_state
+                        .as_ref()
+                        .unwrap()
+                        .custom_error
+                        .borrow()
+                        .clone(),
                     scale,
                 ) {
                     axis_data.borrow_mut().axis_lines = lines
@@ -688,17 +863,22 @@ impl Perspective {
                 };
                 self.update(Message::CalculatePoseUsingVanishingPoint);
             }
-            Message::ZoomChanged(zoom) => self.zoom = zoom,
+            Message::ZoomChanged(zoom) => self.image_state.as_mut().unwrap().zoom = zoom,
             Message::FieldOfViewChanged(field_of_view) => {
-                self.field_of_view = field_of_view;
+                self.image_state.as_mut().unwrap().field_of_view = field_of_view;
                 self.update(Message::PoseLambdaTwist);
             }
             Message::PoseLambdaTwist => {
-                let fx = self.image_size.width as f64;
-                let fy = self.image_size.height as f64;
-                let cx = self.image_size.width as f64 / 2.0;
-                let cy = self.image_size.height as f64 / 2.0;
-                let field_of_view = self.field_of_view.to_radians();
+                let fx = self.image_state.as_ref().unwrap().image_size.width as f64;
+                let fy = self.image_state.as_ref().unwrap().image_size.height as f64;
+                let cx = self.image_state.as_ref().unwrap().image_size.width as f64 / 2.0;
+                let cy = self.image_state.as_ref().unwrap().image_size.height as f64 / 2.0;
+                let field_of_view = self
+                    .image_state
+                    .as_ref()
+                    .unwrap()
+                    .field_of_view
+                    .to_radians();
 
                 let unprojection =
                     cv::nalgebra::Perspective3::new(1.0, field_of_view as f64, 0.1, 1000.0)
@@ -709,11 +889,20 @@ impl Perspective {
                 .append_translation(&cv::nalgebra::Vector2::new(cx, cy))
                 .try_inverse()
                 .unwrap();
-                info!("3d: {:?}", self.twist_points.borrow());
-                info!("2d: {:?}", self.twist_points_2d.borrow());
+                info!(
+                    "3d: {:?}",
+                    self.image_state.as_ref().unwrap().twist_points.borrow()
+                );
                 info!(
                     "2d: {:?}",
-                    self.twist_points_2d
+                    self.image_state.as_ref().unwrap().twist_points_2d.borrow()
+                );
+                info!(
+                    "2d: {:?}",
+                    self.image_state
+                        .as_ref()
+                        .unwrap()
+                        .twist_points_2d
                         .borrow()
                         .iter()
                         .map(|item| {
@@ -722,6 +911,9 @@ impl Perspective {
                         .collect::<Vec<_>>()
                 );
                 let bearings: Vec<cv::nalgebra::Point3<f64>> = self
+                    .image_state
+                    .as_ref()
+                    .unwrap()
                     .twist_points_2d
                     .borrow()
                     .iter()
@@ -741,6 +933,9 @@ impl Perspective {
                     .collect();
                 info!("bearings: {:?}", bearings);
                 let features: Vec<FeatureWorldMatch<_>> = self
+                    .image_state
+                    .as_ref()
+                    .unwrap()
                     .twist_points
                     .borrow()
                     .iter()
@@ -781,28 +976,33 @@ impl Perspective {
                     let item = candidates.iter().next().unwrap();
                     let solution = item.0.to_homogeneous();
                     info!("using the first solution {solution}");
-                    self.compute_solution = Some(ComputeSolution::new(
-                        Matrix4::new(
-                            solution.m11 as f32,
-                            solution.m12 as f32,
-                            solution.m13 as f32,
-                            solution.m14 as f32,
-                            solution.m21 as f32,
-                            solution.m22 as f32,
-                            solution.m23 as f32,
-                            solution.m24 as f32,
-                            solution.m31 as f32,
-                            solution.m32 as f32,
-                            solution.m33 as f32,
-                            solution.m34 as f32,
-                            solution.m41 as f32,
-                            solution.m42 as f32,
-                            solution.m43 as f32,
-                            solution.m44 as f32,
-                        ),
-                        Vector2::new(0.0, 0.0),
-                        self.field_of_view.to_radians(),
-                    ));
+                    self.image_state.as_mut().unwrap().compute_solution =
+                        Some(ComputeSolution::new(
+                            Matrix4::new(
+                                solution.m11 as f32,
+                                solution.m12 as f32,
+                                solution.m13 as f32,
+                                solution.m14 as f32,
+                                solution.m21 as f32,
+                                solution.m22 as f32,
+                                solution.m23 as f32,
+                                solution.m24 as f32,
+                                solution.m31 as f32,
+                                solution.m32 as f32,
+                                solution.m33 as f32,
+                                solution.m34 as f32,
+                                solution.m41 as f32,
+                                solution.m42 as f32,
+                                solution.m43 as f32,
+                                solution.m44 as f32,
+                            ),
+                            Vector2::new(0.0, 0.0),
+                            self.image_state
+                                .as_ref()
+                                .unwrap()
+                                .field_of_view
+                                .to_radians(),
+                        ));
                 }
                 // use cv::Consensus;
                 // // Estimate potential poses with P3P.
@@ -821,70 +1021,130 @@ impl Perspective {
                 // }
             }
             Message::EditPoint(index, edit_component_message) => match index {
-                0 => match self.editor_component_1.update(edit_component_message) {
+                0 => match self
+                    .image_state
+                    .as_mut()
+                    .unwrap()
+                    .editor_component_1
+                    .update(edit_component_message)
+                {
                     Action::Valid(point) => {
-                        self.twist_points.borrow_mut()[index] = point;
+                        self.image_state.as_ref().unwrap().twist_points.borrow_mut()[index] = point;
                     }
 
                     Action::Invalid => {}
                 },
-                1 => match self.editor_component_2.update(edit_component_message) {
+                1 => match self
+                    .image_state
+                    .as_mut()
+                    .unwrap()
+                    .editor_component_2
+                    .update(edit_component_message)
+                {
                     Action::Valid(point) => {
-                        self.twist_points.borrow_mut()[index] = point;
+                        self.image_state.as_ref().unwrap().twist_points.borrow_mut()[index] = point;
                     }
 
                     Action::Invalid => {}
                 },
-                2 => match self.editor_component_3.update(edit_component_message) {
+                2 => match self
+                    .image_state
+                    .as_mut()
+                    .unwrap()
+                    .editor_component_3
+                    .update(edit_component_message)
+                {
                     Action::Valid(point) => {
-                        self.twist_points.borrow_mut()[index] = point;
+                        self.image_state.as_ref().unwrap().twist_points.borrow_mut()[index] = point;
                     }
 
                     Action::Invalid => {}
                 },
                 _ => {}
             },
+            Message::LoadImage => {
+                if let Some(path) = rfd::FileDialog::new()
+                    .add_filter("Image", &["png", "jpg", "jpeg"])
+                    .pick_file()
+                {
+                    if self.image_state.is_none() {
+                        self.image_state = Some(ImageState {
+                            zoom: 0.5,
+                            ..Default::default()
+                        })
+                    };
+                    self.image_state
+                        .as_mut()
+                        .unwrap()
+                        .images
+                        .push(path.to_str().unwrap().to_string());
+                    self.update(Message::SelectImage(
+                        (self.image_state.as_ref().unwrap().images.len() - 1) as u8,
+                    ));
+                }
+            }
+            Message::NoImage => {}
         }
     }
     fn view(&self) -> Element<'_, Message> {
-        let Some(axis_data) = &self.axis_data else {
-            return center(text("Loading...").width(Fill).align_x(Center).size(50)).into();
+        let Some(image_state) = self.image_state.as_ref() else {
+            return center(
+                row![
+                    button("Click").on_press(Message::LoadImage),
+                    text("to open an image").width(Fill),
+                ]
+                .spacing(10)
+                .align_y(Alignment::Center)
+                .width(Length::Shrink),
+            )
+            .into();
         };
 
-        let component: Element<Message> = match self.mode {
+        let component: Element<Message> = match self.image_state.as_ref().unwrap().mode {
             UiMod::Pose => ComputeCameraPose::new(
-                Rc::clone(axis_data),
-                Rc::clone(&self.draw_lines),
-                Rc::clone(&self.reference_cube),
-                &self.compute_solution,
-                Rc::clone(&self.custom_origin_translation),
-                Rc::clone(&self.custom_scale_segment),
-                Rc::clone(&self.custom_scale),
-                Rc::clone(&self.custom_error),
-                Rc::clone(&self.twist_points),
-                Rc::clone(&self.twist_points_2d),
+                Rc::clone(&image_state.axis_data.as_ref().unwrap()),
+                Rc::clone(&self.image_state.as_ref().unwrap().draw_lines),
+                Rc::clone(&self.image_state.as_ref().unwrap().reference_cube),
+                &self.image_state.as_ref().unwrap().compute_solution,
+                Rc::clone(&self.image_state.as_ref().unwrap().custom_origin_translation),
+                Rc::clone(&self.image_state.as_ref().unwrap().custom_scale_segment),
+                Rc::clone(&self.image_state.as_ref().unwrap().custom_scale),
+                Rc::clone(&self.image_state.as_ref().unwrap().custom_error),
+                Rc::clone(&self.image_state.as_ref().unwrap().twist_points),
+                Rc::clone(&self.image_state.as_ref().unwrap().twist_points_2d),
             )
-            .image_size(self.image_size)
+            .image_size(self.image_state.as_ref().unwrap().image_size)
             .width(Length::Fill)
             .height(Length::Fill)
             .into(),
             UiMod::Twist => ComputeCameraPoseTwist::new(
-                Rc::clone(axis_data),
-                Rc::clone(&self.reference_cube),
-                &self.compute_solution,
-                Rc::clone(&self.twist_points),
-                Rc::clone(&self.twist_points_2d),
+                Rc::clone(&self.image_state.as_ref().unwrap().reference_cube),
+                &self.image_state.as_ref().unwrap().compute_solution,
+                Rc::clone(&self.image_state.as_ref().unwrap().twist_points),
+                Rc::clone(&self.image_state.as_ref().unwrap().twist_points_2d),
             )
-            .image_size(self.image_size)
+            .image_size(self.image_state.as_ref().unwrap().image_size)
             .width(Length::Fill)
             .height(Length::Fill)
             .into(),
         };
-
         let canvas = scrollable(stack!(
-            image(self.images.get(self.selected_image as usize).unwrap())
-                .width(self.image_size.width * self.zoom)
-                .height(self.image_size.height * self.zoom),
+            image(
+                self.image_state
+                    .as_ref()
+                    .unwrap()
+                    .images
+                    .get(self.image_state.as_ref().unwrap().selected_image as usize)
+                    .unwrap()
+            )
+            .width(
+                self.image_state.as_ref().unwrap().image_size.width
+                    * self.image_state.as_ref().unwrap().zoom
+            )
+            .height(
+                self.image_state.as_ref().unwrap().image_size.height
+                    * self.image_state.as_ref().unwrap().zoom
+            ),
             component,
         ))
         .direction(Direction::Both {
@@ -894,7 +1154,7 @@ impl Perspective {
 
         let canvas_with_context_menu = ContextMenu::new(canvas, move || {
             let mut buttons = Vec::new();
-            match self.mode {
+            match self.image_state.as_ref().unwrap().mode {
                 UiMod::Pose => {
                     buttons.push(
                         mouse_area(container("Perform calculations").width(Length::Fill))
@@ -929,27 +1189,27 @@ impl Perspective {
                     buttons.push(
                         mouse_area(container("Flip X").width(Length::Fill))
                             .on_press(Message::Flip(
-                                !axis_data.as_ref().borrow().flip.0,
-                                axis_data.as_ref().borrow().flip.1,
-                                axis_data.as_ref().borrow().flip.2,
+                                !image_state.axis_data.as_ref().unwrap().borrow().flip.0,
+                                image_state.axis_data.as_ref().unwrap().borrow().flip.1,
+                                image_state.axis_data.as_ref().unwrap().borrow().flip.2,
                             ))
                             .into(),
                     );
                     buttons.push(
                         mouse_area(container("Flip Y").width(Length::Fill))
                             .on_press(Message::Flip(
-                                axis_data.as_ref().borrow().flip.0,
-                                !axis_data.as_ref().borrow().flip.1,
-                                axis_data.as_ref().borrow().flip.2,
+                                image_state.axis_data.as_ref().unwrap().borrow().flip.0,
+                                !image_state.axis_data.as_ref().unwrap().borrow().flip.1,
+                                image_state.axis_data.as_ref().unwrap().borrow().flip.2,
                             ))
                             .into(),
                     );
                     buttons.push(
                         mouse_area(container("Flip Z").width(Length::Fill))
                             .on_press(Message::Flip(
-                                axis_data.as_ref().borrow().flip.0,
-                                axis_data.as_ref().borrow().flip.1,
-                                !axis_data.as_ref().borrow().flip.2,
+                                image_state.axis_data.as_ref().unwrap().borrow().flip.0,
+                                image_state.axis_data.as_ref().unwrap().borrow().flip.1,
+                                !image_state.axis_data.as_ref().unwrap().borrow().flip.2,
                             ))
                             .into(),
                     );
@@ -1005,14 +1265,15 @@ impl Perspective {
             column(buttons).width(300).padding(5).spacing(7).into()
         });
 
-        let focal_length = if let Some(compute_solution) = &self.compute_solution {
-            format!(
-                "Field of view: {:.2} degrees",
-                compute_solution.field_of_view().to_degrees(),
-            )
-        } else {
-            "Focal length not avaliable. Compute the solution".into()
-        };
+        let focal_length =
+            if let Some(compute_solution) = &self.image_state.as_ref().unwrap().compute_solution {
+                format!(
+                    "Field of view: {:.2} degrees",
+                    compute_solution.field_of_view().to_degrees(),
+                )
+            } else {
+                "Focal length not avaliable. Compute the solution".into()
+            };
 
         column!(
             row!(
@@ -1022,41 +1283,81 @@ impl Perspective {
                     .align_x(Horizontal::Center)
                     .align_y(Vertical::Center),
                 column!(
-                    container(column!(
-                        text("Scale"),
-                        slider(0.25f32..=1.0f32, self.zoom, Message::ZoomChanged).step(0.05),
-                        text(format!("Field of View {:.1}", self.field_of_view)),
-                        slider(
-                            90.0f32..=110.0f32,
-                            self.field_of_view,
-                            Message::FieldOfViewChanged
-                        )
-                        .step(0.1),
-                        self.editor_component_1
-                            .view(&move |action| Message::EditPoint(0, action)),
-                        self.editor_component_2
-                            .view(&move |action| Message::EditPoint(1, action)),
-                        self.editor_component_3
-                            .view(&move |action| Message::EditPoint(2, action)),
-                    ))
-                    .padding(20),
-                    scrollable(
-                        column(self.images.iter().enumerate().map(|(index, item)| {
-                            let opacity = if index as u8 == self.selected_image {
-                                1.0
-                            } else {
-                                0.4
-                            };
-                            mouse_area(
-                                image(item)
-                                    .content_fit(iced::ContentFit::Cover)
-                                    .width(280)
-                                    .height(200)
-                                    .opacity(opacity),
+                    container(
+                        column!(
+                            button(
+                                text("Add image")
+                                    .width(Length::Fill)
+                                    .align_x(Horizontal::Center)
                             )
-                            .on_press(Message::SelectImage(index as u8))
-                            .into()
-                        }))
+                            .on_press(Message::LoadImage)
+                            .width(Length::Fill),
+                            text(format!(
+                                "Scale {:.1}x",
+                                self.image_state.as_ref().unwrap().zoom
+                            )),
+                            slider(
+                                0.25f32..=1.0f32,
+                                self.image_state.as_ref().unwrap().zoom,
+                                Message::ZoomChanged
+                            )
+                            .step(0.05),
+                            text(format!(
+                                "Field of view {:.1} degrees",
+                                self.image_state.as_ref().unwrap().field_of_view
+                            )),
+                            slider(
+                                90.0f32..=110.0f32,
+                                self.image_state.as_ref().unwrap().field_of_view,
+                                Message::FieldOfViewChanged
+                            )
+                            .step(0.1),
+                            self.image_state
+                                .as_ref()
+                                .unwrap()
+                                .editor_component_1
+                                .view(&move |action| Message::EditPoint(0, action)),
+                            self.image_state
+                                .as_ref()
+                                .unwrap()
+                                .editor_component_2
+                                .view(&move |action| Message::EditPoint(1, action)),
+                            self.image_state
+                                .as_ref()
+                                .unwrap()
+                                .editor_component_3
+                                .view(&move |action| Message::EditPoint(2, action)),
+                        )
+                        .spacing(5)
+                    )
+                    .padding(10),
+                    scrollable(
+                        column(
+                            self.image_state
+                                .as_ref()
+                                .unwrap()
+                                .images
+                                .iter()
+                                .enumerate()
+                                .map(|(index, item)| {
+                                    let opacity = if index as u8
+                                        == self.image_state.as_ref().unwrap().selected_image
+                                    {
+                                        1.0
+                                    } else {
+                                        0.4
+                                    };
+                                    mouse_area(
+                                        image(item)
+                                            .content_fit(iced::ContentFit::Cover)
+                                            .width(280)
+                                            .height(200)
+                                            .opacity(opacity),
+                                    )
+                                    .on_press(Message::SelectImage(index as u8))
+                                    .into()
+                                })
+                        )
                         .spacing(20)
                         .padding(20)
                     )
@@ -1075,7 +1376,13 @@ impl Perspective {
 
 impl From<&Perspective> for Lines {
     fn from(value: &Perspective) -> Self {
-        let axis_data = value.axis_data.as_ref().unwrap();
+        let axis_data = value
+            .image_state
+            .as_ref()
+            .unwrap()
+            .axis_data
+            .as_ref()
+            .unwrap();
         let lines = axis_data
             .borrow()
             .axis_lines
@@ -1094,6 +1401,9 @@ impl From<&Perspective> for Lines {
                 });
 
         let twist_points = value
+            .image_state
+            .as_ref()
+            .unwrap()
             .twist_points
             .borrow()
             .iter()
@@ -1105,6 +1415,9 @@ impl From<&Perspective> for Lines {
             .collect();
 
         let twist_points_2d = value
+            .image_state
+            .as_ref()
+            .unwrap()
             .twist_points_2d
             .borrow()
             .iter()
@@ -1123,9 +1436,12 @@ impl From<&Perspective> for Lines {
             },
             twist_points: Some(twist_points),
             twist_points_2d: Some(twist_points_2d),
-            field_of_view: Some(value.field_of_view),
+            field_of_view: Some(value.image_state.as_ref().unwrap().field_of_view),
             points: Some(
                 value
+                    .image_state
+                    .as_ref()
+                    .unwrap()
                     .draw_lines
                     .borrow()
                     .iter()

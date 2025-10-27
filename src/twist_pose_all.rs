@@ -20,7 +20,7 @@ use iced::{
 use nalgebra::{Point2, Point3, Vector2};
 
 use crate::{
-    AxisData, Component,
+    Component,
     compute::data::ComputeSolution,
     utils::{scale_point, scale_point_to_canvas, to_canvas},
 };
@@ -38,7 +38,6 @@ where
     compute_solution: RefCell<Option<ComputeSolution<f32>>>,
     renderer_: PhantomData<Renderer>,
     theme_: PhantomData<Theme>,
-    axis_data: Rc<RefCell<AxisData>>,
     image_size: Size<f32>,
     reference_cub: Rc<RefCell<Vec<Point3<f32>>>>,
     twist_points: Rc<RefCell<Vec<Point3<f32>>>>,
@@ -50,7 +49,6 @@ where
 {
     const DEFAULT_SIZE: f32 = 100.0;
     pub fn new(
-        axis_data: Rc<RefCell<AxisData>>,
         reference_cub: Rc<RefCell<Vec<Point3<f32>>>>,
         compute_solution: &'a Option<ComputeSolution<f32>>,
         twist_points: Rc<RefCell<Vec<Point3<f32>>>>,
@@ -60,7 +58,6 @@ where
             width: Length::Fixed(Self::DEFAULT_SIZE),
             height: Length::Fixed(Self::DEFAULT_SIZE),
             compute_solution: RefCell::new(compute_solution.clone()),
-            axis_data,
             message_: PhantomData,
             renderer_: PhantomData,
             theme_: PhantomData,

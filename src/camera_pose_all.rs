@@ -20,7 +20,6 @@ use iced::{
     widget::canvas::{self, Event, Fill, LineDash, Stroke, Text},
 };
 use nalgebra::{Matrix3, Perspective3, Point2, Point3, Vector2, Vector3};
-use tracing::info;
 
 use crate::{
     AxisData, Component, Edit, EditAxis, PointInformation,
@@ -413,16 +412,16 @@ where
                             .points
                             .borrow()
                             .windows(2)
-                            .enumerate()
-                            .find(|(_index, items)| {
+                            .find(|items| {
                                 let start = items[0];
                                 let end = items[1];
                                 check_if_point_is_from_line_new(&start, &end, cursor)
                             })
+                            .iter()
+                            .enumerate()
                             .map(|(index, _items)| {
                                 self.custom_scale_segment.borrow_mut().replace(index);
                             })
-                            .iter()
                             .count()
                             > 0
                         {
@@ -1345,7 +1344,7 @@ where
                         let item =
                             scale_point_to_canvas(&Point::new(item.x, item.y), bounds.size());
                         let mut builder = canvas::path::Builder::new();
-                        builder.circle(item.clone(), 5.0);
+                        builder.circle(item, 5.0);
                         let path = builder.build();
                         frame.fill_rectangle(
                             Point::new(item.x + 2.0, item.y + 2.0),
