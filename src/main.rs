@@ -1010,6 +1010,8 @@ impl Perspective {
                 {
                     if self.image_state.is_none() {
                         self.image_state = Some(ImageState {
+                            //TODO: handle the intial load of the lines to draw
+                            draw_lines: Rc::new(RefCell::new(vec![Vector3::<f32>::zeros()])),
                             zoom: 0.5,
                             ..Default::default()
                         })

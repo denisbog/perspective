@@ -1261,7 +1261,7 @@ where
                 let last_point_3d = *self.draw_lines.borrow().get(state.selected)?;
                 (axis, last_point_3d, Color::from_rgba(0.2, 0.8, 0.2, 0.8))
             }
-            _w => {
+            _ => {
                 return None;
             }
         };
