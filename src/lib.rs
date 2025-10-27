@@ -1,4 +1,3 @@
-pub mod arrsac;
 pub mod camera_pose_all;
 pub mod compute;
 pub mod decoder;
@@ -70,7 +69,6 @@ pub enum Component {
 }
 #[derive(Default, Clone, Debug)]
 pub enum Edit {
-    MarkError(EditAxis),
     ControlPoint(EditAxis),
     Draw,
     Extrude(EditAxis),

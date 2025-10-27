@@ -63,7 +63,6 @@ where
     custom_origin_translation: Rc<RefCell<Option<Vector3<f32>>>>,
     custom_scale_segment: Rc<RefCell<Option<usize>>>,
     custom_scale: Rc<RefCell<Option<PointInformation<f32>>>>,
-    custom_error: Rc<RefCell<Option<PointInformation<f32>>>>,
 }
 impl<'a, M, Theme, Renderer> ComputeCameraPose<M, Theme, Renderer>
 where
@@ -79,7 +78,6 @@ where
         custom_origin_translation: Rc<RefCell<Option<Vector3<f32>>>>,
         custom_scale_segment: Rc<RefCell<Option<usize>>>,
         custom_scale: Rc<RefCell<Option<PointInformation<f32>>>>,
-        custom_error: Rc<RefCell<Option<PointInformation<f32>>>>,
     ) -> Self {
         ComputeCameraPose {
             width: Length::Fixed(Self::DEFAULT_SIZE),
@@ -100,7 +98,6 @@ where
             custom_origin_translation,
             custom_scale_segment,
             custom_scale,
-            custom_error,
         }
     }
     pub fn width(mut self, width: impl Into<Length>) -> Self {
@@ -226,10 +223,6 @@ where
                             state.edit_state = Edit::Scale(EditAxis::EditX);
                             (Status::Captured, None)
                         }
-                        Edit::MarkError(_) => {
-                            state.edit_state = Edit::MarkError(EditAxis::EditX);
-                            (Status::Captured, None)
-                        }
                         _ => (Status::Captured, None),
                     },
                     "s" => match state.edit_state {
@@ -257,10 +250,6 @@ where
                             state.edit_state = Edit::Scale(EditAxis::EditY);
                             (Status::Captured, None)
                         }
-                        Edit::MarkError(_) => {
-                            state.edit_state = Edit::MarkError(EditAxis::EditY);
-                            (Status::Captured, None)
-                        }
                         _ => (Status::Captured, None),
                     },
                     "t" => match state.edit_state {
@@ -279,10 +268,6 @@ where
                             state.edit_state = Edit::Scale(EditAxis::EditZ);
                             (Status::Captured, None)
                         }
-                        Edit::MarkError(_) => {
-                            state.edit_state = Edit::MarkError(EditAxis::EditZ);
-                            (Status::Captured, None)
-                        }
                         _ => (Status::Captured, None),
                     },
                     "x" => {
@@ -299,10 +284,6 @@ where
                             self.draw_lines_cache.clear();
                         }
                         state.edit_state = Edit::Draw;
-                        (Status::Captured, None)
-                    }
-                    "q" => {
-                        state.edit_state = Edit::MarkError(EditAxis::None);
                         (Status::Captured, None)
                     }
                     _ => (Status::Ignored, None),
@@ -493,19 +474,6 @@ where
                         self.draw_lines_cache.clear();
                         state.edit_state = Edit::Draw;
                     }
-                    Edit::MarkError(axis) => {
-                        self.custom_error.borrow_mut().replace(PointInformation {
-                            vector: new_point_3d,
-                            source_vector: *self.draw_lines.borrow().get(state.selected).unwrap(),
-                            point: Vector2::new(
-                                adjusted_cursor.x / bounds.width,
-                                adjusted_cursor.y / bounds.height,
-                            ),
-                            axis: axis.clone(),
-                        });
-                        self.draw_lines_cache.clear();
-                        state.edit_state = Edit::Draw;
-                    }
 
                     _ => (),
                 }
@@ -578,9 +546,7 @@ where
                         self.vanishing_lines_cache.clear();
                         (Status::Captured, None)
                     }
-                    Edit::Extrude(_) | Edit::Scale(_) | Edit::MarkError(_) => {
-                        (Status::Captured, None)
-                    }
+                    Edit::Extrude(_) | Edit::Scale(_) => (Status::Captured, None),
                     Edit::None => (
                         // Status::Ignored, //TODO: check to avoid requesting redraw
                         Status::Captured,
@@ -641,7 +607,6 @@ where
 
             if let Edit::Draw = state.edit_state {
                 let selected_color = match &state.edit_state {
-                    Edit::MarkError(_) => Color::from_rgba(0.8, 0.2, 0.2, 0.8),
                     Edit::ControlPoint(_) => Color::from_rgba(0.8, 0.8, 0.2, 0.8),
                     Edit::Draw => Color::from_rgba(0.8, 0.8, 0.2, 0.8),
                     Edit::Extrude(_) => Color::from_rgba(0.8, 0.8, 0.8, 0.8),
@@ -720,42 +685,6 @@ where
                         &path,
                         Stroke {
                             style: canvas::Style::Solid(Color::from_rgba(0.2, 0.8, 0.2, 0.8)),
-                            width: 2.0,
-                            ..Stroke::default()
-                        },
-                    );
-                }
-                if let Some(custom_error) = self.custom_error.borrow().as_ref() {
-                    let start = to_canvas(
-                        bounds.size(),
-                        &self
-                            .compute_solution
-                            .borrow()
-                            .as_ref()
-                            .unwrap()
-                            .calculate_location_position_to_2d(&custom_error.source_vector)
-                            .unwrap(),
-                    );
-                    let end = to_canvas(
-                        bounds.size(),
-                        &self
-                            .compute_solution
-                            .borrow()
-                            .as_ref()
-                            .unwrap()
-                            .calculate_location_position_to_2d(&custom_error.vector)
-                            .unwrap(),
-                    );
-                    let start = Point::new(start.x, start.y);
-                    let end = Point::new(end.x, end.y);
-                    let mut builder = canvas::path::Builder::new();
-                    builder.move_to(start);
-                    builder.line_to(end);
-                    let path = builder.build();
-                    frame.stroke(
-                        &path,
-                        Stroke {
-                            style: canvas::Style::Solid(Color::from_rgba(0.8, 0.2, 0.2, 0.8)),
                             width: 2.0,
                             ..Stroke::default()
                         },
@@ -1331,10 +1260,6 @@ where
             Edit::Scale(axis) => {
                 let last_point_3d = *self.draw_lines.borrow().get(state.selected)?;
                 (axis, last_point_3d, Color::from_rgba(0.2, 0.8, 0.2, 0.8))
-            }
-            Edit::MarkError(axis) => {
-                let last_point_3d = *self.draw_lines.borrow().get(state.selected)?;
-                (axis, last_point_3d, Color::from_rgba(0.8, 0.2, 0.2, 0.8))
             }
             _w => {
                 return None;

@@ -17,7 +17,7 @@ use perspective::compute::{
     read_points_from_file, store_scene_data_to_file,
 };
 use perspective::optimize::{
-    ortho_center_optimize, ortho_center_optimize_x, ortho_center_optimize_y, pose_optimize,
+    ortho_center_optimize, ortho_center_optimize_x, ortho_center_optimize_y,
 };
 use perspective::read_state::{ImageData, load};
 use perspective::twist::LambdaTwist;
@@ -100,7 +100,6 @@ enum Message {
     ChangeMode(UiMod),
     ExportToFSpy,
     Optimize,
-    OptimizeForError,
     ZoomChanged(f32),
     FieldOfViewChanged(f32),
     ScaleToDimension,
@@ -805,61 +804,6 @@ impl Perspective {
                     self.update(Message::CalculatePoseUsingVanishingPoint);
                 };
             }
-            Message::OptimizeForError => {
-                let Some(axis_data) = &self.image_state.as_ref().unwrap().axis_data else {
-                    return;
-                };
-                let ratio = self.image_state.as_ref().unwrap().image_size.width
-                    / self.image_state.as_ref().unwrap().image_size.height;
-                let axis_lines = axis_data
-                    .borrow()
-                    .axis_lines
-                    .iter()
-                    .cloned()
-                    .flat_map(|(a, b)| [Vector2::new(a.x, a.y), Vector2::new(b.x, b.y)])
-                    .collect();
-
-                let control_point = Vector2::new(
-                    axis_data.borrow().control_point.x,
-                    axis_data.borrow().control_point.y,
-                );
-
-                let flip = axis_data.borrow().flip;
-                let custom_translation = axis_data
-                    .borrow()
-                    .custom_origin_translation
-                    .unwrap_or_default();
-                //let draw_lines = self.image_state.unwrap().draw_lines.borrow().to_vec();
-                let scale = axis_data.borrow().custom_scale.unwrap_or(1.0) as f64;
-                if let Ok(lines) = pose_optimize(
-                    ratio,
-                    axis_lines,
-                    //draw_lines,
-                    control_point,
-                    flip,
-                    custom_translation,
-                    //*self.image_state.unwrap().custom_scale_segment.borrow(),
-                    //self.image_state.unwrap().custom_scale.borrow().clone(),
-                    self.image_state
-                        .as_ref()
-                        .unwrap()
-                        .custom_error
-                        .borrow()
-                        .clone(),
-                    scale,
-                ) {
-                    axis_data.borrow_mut().axis_lines = lines
-                        .chunks(2)
-                        .map(|items| {
-                            (
-                                Point::new(items[0].x, items[0].y),
-                                Point::new(items[1].x, items[1].y),
-                            )
-                        })
-                        .collect();
-                };
-                self.update(Message::CalculatePoseUsingVanishingPoint);
-            }
             Message::ZoomChanged(zoom) => self.image_state.as_mut().unwrap().zoom = zoom,
             Message::FieldOfViewChanged(field_of_view) => {
                 self.image_state.as_mut().unwrap().field_of_view = field_of_view;
@@ -1100,7 +1044,6 @@ impl Perspective {
                 Rc::clone(&self.image_state.as_ref().unwrap().custom_origin_translation),
                 Rc::clone(&self.image_state.as_ref().unwrap().custom_scale_segment),
                 Rc::clone(&self.image_state.as_ref().unwrap().custom_scale),
-                Rc::clone(&self.image_state.as_ref().unwrap().custom_error),
             )
             .image_size(self.image_state.as_ref().unwrap().image_size)
             .width(Length::Fill)
@@ -1222,11 +1165,6 @@ impl Perspective {
                     buttons.push(
                         mouse_area(container("Optimize Y axis").width(Length::Fill))
                             .on_press(Message::OptimizeY)
-                            .into(),
-                    );
-                    buttons.push(
-                        mouse_area(container("Optimize Error").width(Length::Fill))
-                            .on_press(Message::OptimizeForError)
                             .into(),
                     );
                 }
