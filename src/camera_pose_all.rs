@@ -48,7 +48,6 @@ where
     height: Length,
     message_: PhantomData<Message>,
     cache: geometry::Cache<Renderer>,
-    twist_points_cache: geometry::Cache<Renderer>,
     axis_cache: geometry::Cache<Renderer>,
     draw_lines_cache: geometry::Cache<Renderer>,
     vanishing_lines_cache: geometry::Cache<Renderer>,
@@ -65,8 +64,6 @@ where
     custom_scale_segment: Rc<RefCell<Option<usize>>>,
     custom_scale: Rc<RefCell<Option<PointInformation<f32>>>>,
     custom_error: Rc<RefCell<Option<PointInformation<f32>>>>,
-    twist_points: Rc<RefCell<Vec<Point3<f32>>>>,
-    twist_points_2d: Rc<RefCell<Vec<Point2<f32>>>>,
 }
 impl<'a, M, Theme, Renderer> ComputeCameraPose<M, Theme, Renderer>
 where
@@ -83,8 +80,6 @@ where
         custom_scale_segment: Rc<RefCell<Option<usize>>>,
         custom_scale: Rc<RefCell<Option<PointInformation<f32>>>>,
         custom_error: Rc<RefCell<Option<PointInformation<f32>>>>,
-        twist_points: Rc<RefCell<Vec<Point3<f32>>>>,
-        twist_points_2d: Rc<RefCell<Vec<Point2<f32>>>>,
     ) -> Self {
         ComputeCameraPose {
             width: Length::Fixed(Self::DEFAULT_SIZE),
@@ -95,7 +90,6 @@ where
             renderer_: PhantomData,
             theme_: PhantomData,
             cache: geometry::Cache::default(),
-            twist_points_cache: geometry::Cache::default(),
             axis_cache: geometry::Cache::default(),
             draw_lines_cache: geometry::Cache::new(),
             vanishing_lines_cache: geometry::Cache::default(),
@@ -107,8 +101,6 @@ where
             custom_scale_segment,
             custom_scale,
             custom_error,
-            twist_points,
-            twist_points_2d,
         }
     }
     pub fn width(mut self, width: impl Into<Length>) -> Self {
@@ -313,10 +305,6 @@ where
                         state.edit_state = Edit::MarkError(EditAxis::None);
                         (Status::Captured, None)
                     }
-                    "p" => {
-                        state.edit_state = Edit::Twist;
-                        (Status::Captured, None)
-                    }
                     _ => (Status::Ignored, None),
                 }
             }
@@ -472,32 +460,11 @@ where
                             (Status::Ignored, None)
                         }
                     }
-                    Edit::Twist => {
-                        let cursor = Point::new(adjusted_cursor.x, adjusted_cursor.y);
-                        self.twist_points_2d.borrow().iter().enumerate().for_each(
-                            |(index, item)| {
-                                let item = scale_point_to_canvas(
-                                    &Point::new(item.x, item.y),
-                                    bounds.size(),
-                                );
-                                if cursor.distance(item) < 10.0 {
-                                    state.selected_match_point = Some(index);
-                                }
-                            },
-                        );
-                        (Status::Captured, None)
-                    }
                     _ => (Status::Ignored, None),
                 }
             }
 
             Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
-                if let Edit::Twist = state.edit_state {
-                    println!("clear");
-                    state.selected_match_point = None;
-                    self.twist_points_cache.clear();
-                    return (Status::Captured, None);
-                }
                 let Some((new_point_3d, last_point_3d, _color)) =
                     self.extract_last_point_details_for_mode(state, bounds, &adjusted_cursor)
                 else {
@@ -621,19 +588,6 @@ where
                             cursor: scale_cursor,
                         }),
                     ),
-                    Edit::Twist => {
-                        if let Some(selected_match_point) = state.selected_match_point {
-                            *self
-                                .twist_points_2d
-                                .borrow_mut()
-                                .get_mut(selected_match_point)
-                                .unwrap() = Point2::new(scale_cursor.x, scale_cursor.y);
-                            self.twist_points_cache.clear();
-                            (Status::Captured, None)
-                        } else {
-                            (Status::Ignored, None)
-                        }
-                    }
                     _ => (Status::Ignored, None),
                 }
             }
@@ -1327,107 +1281,9 @@ where
                 );
             });
 
-        let twist_point = self
-            .twist_points_cache
-            .draw(renderer, bounds.size(), |frame| {
-                let selected_color = match &state.edit_state {
-                    Edit::MarkError(_) => Color::from_rgba(0.8, 0.2, 0.2, 0.8),
-                    Edit::ControlPoint(_) => Color::from_rgba(0.8, 0.8, 0.2, 0.8),
-                    Edit::Draw => Color::from_rgba(0.8, 0.8, 0.2, 0.8),
-                    Edit::Extrude(_) => Color::from_rgba(0.8, 0.8, 0.8, 0.8),
-                    Edit::Scale(_) => Color::from_rgba(0.2, 0.8, 0.2, 0.8),
-                    Edit::None => Color::from_rgba(0.8, 0.8, 0.2, 0.8),
-                    _ => Color::from_rgba(0.8, 0.8, 0.2, 0.8),
-                };
-                if let Some(selected) = state.selected_match_point {
-                    if let Some(item) = self.twist_points_2d.borrow().get(selected) {
-                        let item =
-                            scale_point_to_canvas(&Point::new(item.x, item.y), bounds.size());
-                        let mut builder = canvas::path::Builder::new();
-                        builder.circle(item, 5.0);
-                        let path = builder.build();
-                        frame.fill_rectangle(
-                            Point::new(item.x + 2.0, item.y + 2.0),
-                            Size::new(120.0, 15.0),
-                            Fill {
-                                style: canvas::Style::Solid(Color::from_rgba(0.3, 0.3, 0.3, 0.9)),
-                                ..Fill::default()
-                            },
-                        );
-
-                        if let Some(twist_point) = self.twist_points.borrow().get(selected) {
-                            frame.fill_text(Text {
-                                content: format!(
-                                    "{:>7.3},{:>7.3},{:>7.3}",
-                                    twist_point.x, twist_point.y, twist_point.z
-                                ),
-                                position: Point::new(item.x + 4.0, item.y + 4.0),
-                                color: Color::from_rgba(0.8, 0.8, 0.8, 0.8),
-                                size: Pixels(10.0),
-                                ..Default::default()
-                            });
-                            frame.stroke(
-                                &path,
-                                Stroke {
-                                    style: canvas::Style::Solid(selected_color),
-                                    width: 2.0,
-                                    ..Stroke::default()
-                                },
-                            );
-                        }
-                    }
-                } else {
-                    self.twist_points_2d
-                        .borrow()
-                        .iter()
-                        .enumerate()
-                        .for_each(|(selected, item)| {
-                            let item =
-                                scale_point_to_canvas(&Point::new(item.x, item.y), bounds.size());
-                            let mut builder = canvas::path::Builder::new();
-                            builder.circle(item.clone(), 5.0);
-                            let path = builder.build();
-                            frame.fill_rectangle(
-                                Point::new(item.x + 2.0, item.y + 2.0),
-                                Size::new(120.0, 15.0),
-                                Fill {
-                                    style: canvas::Style::Solid(Color::from_rgba(
-                                        0.3, 0.3, 0.3, 0.9,
-                                    )),
-                                    ..Fill::default()
-                                },
-                            );
-
-                            if let Some(twist_point) = self.twist_points.borrow().get(selected) {
-                                frame.fill_text(Text {
-                                    content: format!(
-                                        "{:>7.3},{:>7.3},{:>7.3}",
-                                        twist_point.x, twist_point.y, twist_point.z
-                                    ),
-                                    position: Point::new(item.x + 4.0, item.y + 4.0),
-                                    color: Color::from_rgba(0.8, 0.8, 0.8, 0.8),
-                                    size: Pixels(10.0),
-                                    ..Default::default()
-                                });
-                                frame.stroke(
-                                    &path,
-                                    Stroke {
-                                        style: canvas::Style::Solid(selected_color),
-                                        width: 2.0,
-                                        ..Stroke::default()
-                                    },
-                                );
-                            }
-                        })
-                };
-            });
-
         match state.edit_state {
             Edit::None | Edit::VanishingPoint(_) | Edit::ControlPoint(_) => {
                 vec![vanishing_lines_cache, draw_lines_cache, draw, axis_cache]
-            }
-            Edit::Twist => {
-                vec![twist_point, draw_lines_cache, draw]
             }
             _ => vec![vanishing_lines_cache, draw_lines_cache, draw],
         }

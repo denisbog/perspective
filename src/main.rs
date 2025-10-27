@@ -83,14 +83,6 @@ enum UiMod {
 }
 
 #[derive(Debug, Clone)]
-enum TwistPointEdit {
-    Point1(Point3<f32>),
-    Point2(Point3<f32>),
-    Point3(Point3<f32>),
-    None,
-}
-
-#[derive(Debug, Clone)]
 enum Message {
     Save,
     LoadLines,
@@ -542,8 +534,11 @@ impl Perspective {
                 let point = twist_points.get(2).unwrap();
                 self.image_state.as_mut().unwrap().editor_component_3 =
                     EditorComponent::new("Point #3", point);
-                // self.image_state.unwrap().update(Message::CalculatePoseUsingVanishingPoint);
-                self.update(Message::PoseLambdaTwist);
+
+                match self.image_state.as_ref().unwrap().mode {
+                    UiMod::Pose => self.update(Message::CalculatePoseUsingVanishingPoint),
+                    UiMod::Twist => self.update(Message::PoseLambdaTwist),
+                }
             }
             Message::ChangeMode(mode) => {
                 self.image_state.as_mut().unwrap().mode = mode;
@@ -1110,8 +1105,6 @@ impl Perspective {
                 Rc::clone(&self.image_state.as_ref().unwrap().custom_scale_segment),
                 Rc::clone(&self.image_state.as_ref().unwrap().custom_scale),
                 Rc::clone(&self.image_state.as_ref().unwrap().custom_error),
-                Rc::clone(&self.image_state.as_ref().unwrap().twist_points),
-                Rc::clone(&self.image_state.as_ref().unwrap().twist_points_2d),
             )
             .image_size(self.image_state.as_ref().unwrap().image_size)
             .width(Length::Fill)
@@ -1264,17 +1257,38 @@ impl Perspective {
             }
             column(buttons).width(300).padding(5).spacing(7).into()
         });
-
-        let focal_length =
-            if let Some(compute_solution) = &self.image_state.as_ref().unwrap().compute_solution {
-                format!(
-                    "Field of view: {:.2} degrees",
-                    compute_solution.field_of_view().to_degrees(),
+        let field_of_view_element = match self.image_state.as_ref().unwrap().mode {
+            UiMod::Pose => {
+                let field_of_view = if let Some(compute_solution) =
+                    &self.image_state.as_ref().unwrap().compute_solution
+                {
+                    format!(
+                        "Field of view: {:.2} degrees",
+                        compute_solution.field_of_view().to_degrees(),
+                    )
+                } else {
+                    "Focal length not avaliable. Compute the solution".into()
+                };
+                container(column![text(field_of_view)])
+            }
+            UiMod::Twist => container(column![
+                text(format!(
+                    "Field of view {:.1} degrees",
+                    self.image_state.as_ref().unwrap().field_of_view
+                )),
+                slider(
+                    90.0f32..=110.0f32,
+                    self.image_state.as_ref().unwrap().field_of_view,
+                    Message::FieldOfViewChanged
                 )
-            } else {
-                "Focal length not avaliable. Compute the solution".into()
-            };
+                .step(0.1)
+            ]),
+        };
 
+        let mode = match self.image_state.as_ref().unwrap().mode {
+            UiMod::Pose => text("Pose Mode"),
+            UiMod::Twist => text("Twist Mode"),
+        };
         column!(
             row!(
                 container(canvas_with_context_menu)
@@ -1285,6 +1299,7 @@ impl Perspective {
                 column!(
                     container(
                         column!(
+                            mode,
                             button(
                                 text("Add image")
                                     .width(Length::Fill)
@@ -1302,16 +1317,7 @@ impl Perspective {
                                 Message::ZoomChanged
                             )
                             .step(0.05),
-                            text(format!(
-                                "Field of view {:.1} degrees",
-                                self.image_state.as_ref().unwrap().field_of_view
-                            )),
-                            slider(
-                                90.0f32..=110.0f32,
-                                self.image_state.as_ref().unwrap().field_of_view,
-                                Message::FieldOfViewChanged
-                            )
-                            .step(0.1),
+                            field_of_view_element,
                             self.image_state
                                 .as_ref()
                                 .unwrap()
