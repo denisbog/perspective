@@ -115,7 +115,9 @@ enum Message {
 
 #[derive(Default)]
 struct Perspective {
+    mode: UiMod,
     image_state: Option<ImageState>,
+    images: Vec<String>,
 }
 
 #[derive(Default)]
@@ -129,8 +131,6 @@ struct ImageState {
     draw_lines: Rc<RefCell<Vec<Vector3<f32>>>>,
     reference_cube: Rc<RefCell<Vec<Point3<f32>>>>,
     selected_image: u8,
-    images: Vec<String>,
-    mode: UiMod,
     custom_origin_translation: Rc<RefCell<Option<Vector3<f32>>>>,
     custom_scale_segment: Rc<RefCell<Option<usize>>>,
     custom_scale: Rc<RefCell<Option<PointInformation<f32>>>>,
@@ -196,7 +196,6 @@ impl Perspective {
                 image_path: first_image.clone(),
                 draw_lines,
                 reference_cube: reference_cub,
-                images: args.images,
                 export_file_name,
                 points_file_name: points.clone(),
                 zoom: 0.5,
@@ -211,6 +210,8 @@ impl Perspective {
             };
             let init = Perspective {
                 image_state: Some(image_state),
+                images: args.images,
+                ..Default::default()
             };
             (
                 init,
@@ -535,21 +536,22 @@ impl Perspective {
                 self.image_state.as_mut().unwrap().editor_component_3 =
                     EditorComponent::new("Point #3", point);
 
-                match self.image_state.as_ref().unwrap().mode {
+                match self.mode {
                     UiMod::Pose => self.update(Message::CalculatePoseUsingVanishingPoint),
                     UiMod::Twist => self.update(Message::PoseLambdaTwist),
                 }
             }
             Message::ChangeMode(mode) => {
-                self.image_state.as_mut().unwrap().mode = mode;
+                self.mode = mode;
+                match self.mode {
+                    UiMod::Pose => self.update(Message::CalculatePoseUsingVanishingPoint),
+                    UiMod::Twist => self.update(Message::PoseLambdaTwist),
+                }
             }
             Message::SelectImage(selected) => {
                 self.update(Message::Save);
                 self.image_state.as_mut().unwrap().selected_image = selected;
                 let selected_image_name = self
-                    .image_state
-                    .as_ref()
-                    .unwrap()
                     .images
                     .get(self.image_state.as_ref().unwrap().selected_image as usize)
                     .unwrap()
@@ -1068,14 +1070,8 @@ impl Perspective {
                             ..Default::default()
                         })
                     };
-                    self.image_state
-                        .as_mut()
-                        .unwrap()
-                        .images
-                        .push(path.to_str().unwrap().to_string());
-                    self.update(Message::SelectImage(
-                        (self.image_state.as_ref().unwrap().images.len() - 1) as u8,
-                    ));
+                    self.images.push(path.to_str().unwrap().to_string());
+                    self.update(Message::SelectImage((self.images.len() - 1) as u8));
                 }
             }
             Message::NoImage => {}
@@ -1095,7 +1091,7 @@ impl Perspective {
             .into();
         };
 
-        let component: Element<Message> = match self.image_state.as_ref().unwrap().mode {
+        let component: Element<Message> = match self.mode {
             UiMod::Pose => ComputeCameraPose::new(
                 Rc::clone(&image_state.axis_data.as_ref().unwrap()),
                 Rc::clone(&self.image_state.as_ref().unwrap().draw_lines),
@@ -1123,10 +1119,7 @@ impl Perspective {
         };
         let canvas = scrollable(stack!(
             image(
-                self.image_state
-                    .as_ref()
-                    .unwrap()
-                    .images
+                self.images
                     .get(self.image_state.as_ref().unwrap().selected_image as usize)
                     .unwrap()
             )
@@ -1147,7 +1140,7 @@ impl Perspective {
 
         let canvas_with_context_menu = ContextMenu::new(canvas, move || {
             let mut buttons = Vec::new();
-            match self.image_state.as_ref().unwrap().mode {
+            match self.mode {
                 UiMod::Pose => {
                     buttons.push(
                         mouse_area(container("Perform calculations").width(Length::Fill))
@@ -1257,7 +1250,7 @@ impl Perspective {
             }
             column(buttons).width(300).padding(5).spacing(7).into()
         });
-        let field_of_view_element = match self.image_state.as_ref().unwrap().mode {
+        let field_of_view_element = match self.mode {
             UiMod::Pose => {
                 let field_of_view = if let Some(compute_solution) =
                     &self.image_state.as_ref().unwrap().compute_solution
@@ -1285,7 +1278,7 @@ impl Perspective {
             ]),
         };
 
-        let mode = match self.image_state.as_ref().unwrap().mode {
+        let mode = match self.mode {
             UiMod::Pose => text("Pose Mode"),
             UiMod::Twist => text("Twist Mode"),
         };
@@ -1338,32 +1331,24 @@ impl Perspective {
                     )
                     .padding(10),
                     scrollable(
-                        column(
-                            self.image_state
-                                .as_ref()
-                                .unwrap()
-                                .images
-                                .iter()
-                                .enumerate()
-                                .map(|(index, item)| {
-                                    let opacity = if index as u8
-                                        == self.image_state.as_ref().unwrap().selected_image
-                                    {
-                                        1.0
-                                    } else {
-                                        0.4
-                                    };
-                                    mouse_area(
-                                        image(item)
-                                            .content_fit(iced::ContentFit::Cover)
-                                            .width(280)
-                                            .height(200)
-                                            .opacity(opacity),
-                                    )
-                                    .on_press(Message::SelectImage(index as u8))
-                                    .into()
-                                })
-                        )
+                        column(self.images.iter().enumerate().map(|(index, item)| {
+                            let opacity = if index as u8
+                                == self.image_state.as_ref().unwrap().selected_image
+                            {
+                                1.0
+                            } else {
+                                0.4
+                            };
+                            mouse_area(
+                                image(item)
+                                    .content_fit(iced::ContentFit::Cover)
+                                    .width(280)
+                                    .height(200)
+                                    .opacity(opacity),
+                            )
+                            .on_press(Message::SelectImage(index as u8))
+                            .into()
+                        }))
                         .spacing(20)
                         .padding(20)
                     )
