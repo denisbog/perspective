@@ -9,6 +9,7 @@ use iced::widget::{
     button, center, column, container, image, mouse_area, row, scrollable, slider, stack, text,
 };
 use iced::{Element, Length, Point, Size, Task, Theme, keyboard};
+use lambda_twist::LambdaTwist;
 use nalgebra::{Matrix4, Point2, Point3, Vector2, Vector3};
 use perspective::camera_pose_all::ComputeCameraPose;
 use perspective::compute::data::ComputeSolution;
@@ -20,7 +21,6 @@ use perspective::optimize::{
     ortho_center_optimize, ortho_center_optimize_x, ortho_center_optimize_y,
 };
 use perspective::read_state::{ImageData, load};
-use perspective::twist::LambdaTwist;
 use perspective::twist_pose_all::ComputeCameraPoseTwist;
 use perspective::{AxisData, PointInformation};
 use std::cell::RefCell;
@@ -882,10 +882,11 @@ impl Perspective {
                     .iter()
                     .zip(&bearings)
                     .map(|(&world, &image)| {
+                        //INFO: in Blender camera looks at -Z, in computer vision camera looks at +Z, inverting all coordinates
                         let world = cv::nalgebra::Point3::new(
-                            world.x as f64,
-                            world.y as f64,
-                            world.z as f64,
+                            -world.x as f64,
+                            -world.y as f64,
+                            -world.z as f64,
                         );
                         let bearing = cv::nalgebra::Unit::new_normalize(
                             cv::nalgebra::Vector3::new(image.x, image.y, 1.0),
@@ -917,21 +918,22 @@ impl Perspective {
                     let item = candidates.iter().next().unwrap();
                     let solution = item.0.to_homogeneous();
                     info!("using the first solution {solution}");
+                    //INFO: invert returned translation vector (world = -camera)
                     self.image_state.as_mut().unwrap().compute_solution =
                         Some(ComputeSolution::new(
                             Matrix4::new(
                                 solution.m11 as f32,
                                 solution.m12 as f32,
                                 solution.m13 as f32,
-                                solution.m14 as f32,
+                                -solution.m14 as f32,
                                 solution.m21 as f32,
                                 solution.m22 as f32,
                                 solution.m23 as f32,
-                                solution.m24 as f32,
+                                -solution.m24 as f32,
                                 solution.m31 as f32,
                                 solution.m32 as f32,
                                 solution.m33 as f32,
-                                solution.m34 as f32,
+                                -solution.m34 as f32,
                                 solution.m41 as f32,
                                 solution.m42 as f32,
                                 solution.m43 as f32,

@@ -9,8 +9,6 @@ pub mod fspy;
 pub mod local_test;
 pub mod optimize;
 pub mod read_state;
-pub mod twist;
-pub mod twist_point;
 pub mod twist_pose_all;
 pub mod utils;
 use std::fmt::Debug;
