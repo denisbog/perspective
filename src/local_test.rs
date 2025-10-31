@@ -1,19 +1,11 @@
 #[cfg(test)]
 mod local_tests {
-    use crate::{
-        arrsac::Arrsac,
-        compute::{compute_ui_adapter, store_scene_data_to_file},
-        read_state::load,
-        twist::LambdaTwist,
-        utils::{relative_to_image_plane, to_canvas},
-    };
+    use crate::{compute::compute_ui_adapter, read_state::load, utils::to_canvas};
     use anyhow::Result;
-    use cv::{FeatureWorldMatch, Projective, WorldPoint, nalgebra::Unit};
+    use cv::{FeatureWorldMatch, WorldPoint, consensus::Arrsac, nalgebra::Unit};
     use iced::{Point, Size};
-    use nalgebra::{
-        Matrix4, Perspective3, Point3, Rotation3, RowVector3, Translation, UnitVector3, Vector2,
-        Vector3, Vector4,
-    };
+    use lambda_twist::LambdaTwist;
+    use nalgebra::{Matrix4, Point3, Vector4};
     use rand::{SeedableRng, rngs::SmallRng};
     use std::{cell::RefCell, rc::Rc};
     use tracing::{info, trace};

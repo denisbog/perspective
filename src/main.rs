@@ -133,7 +133,6 @@ struct ImageState {
     custom_origin_translation: Rc<RefCell<Option<Vector3<f32>>>>,
     custom_scale_segment: Rc<RefCell<Option<usize>>>,
     custom_scale: Rc<RefCell<Option<PointInformation<f32>>>>,
-    custom_error: Rc<RefCell<Option<PointInformation<f32>>>>,
     zoom: f32,
     dimension: Option<f32>,
     twist_points: Rc<RefCell<Vec<Point3<f32>>>>,
@@ -174,15 +173,15 @@ impl Perspective {
             let reference_cub = Rc::new(RefCell::new(vec![Point3::<f32>::new(0.0, 0.0, 0.0)]));
 
             let twist_points = Rc::new(RefCell::new(vec![
-                Point3::new(7.54, 0.0, 0.0),
-                Point3::new(3.14, 0.0, 2.4),
-                Point3::new(3.57, 3.61, 0.0),
+                Point3::new(1.0, 0.0, 0.0),
+                Point3::new(0.0, 1.0, 0.0),
+                Point3::new(0.0, 0.0, 1.0),
             ]));
 
             let twist_points_2d = Rc::new(RefCell::new(vec![
-                Point2::new(0.5, 0.5),
-                Point2::new(0.5, 0.5),
-                Point2::new(0.5, 0.5),
+                Point2::new(0.4, 0.6),
+                Point2::new(0.6, 0.6),
+                Point2::new(0.5, 0.4),
             ]));
 
             let editor_component_1 =
@@ -488,13 +487,19 @@ impl Perspective {
                 let mut reference_cube = vec![
                     Point3::<f32>::new(0.0, 0.0, 0.0),
                     Point3::<f32>::new(size.x, 0.0, 0.0),
+                    Point3::<f32>::new(size.x, 0.0, 0.0),
                     Point3::<f32>::new(size.x, size.y, 0.0),
+                    Point3::<f32>::new(size.x, size.y, 0.0),
+                    Point3::<f32>::new(0.0, size.y, 0.0),
                     Point3::<f32>::new(0.0, size.y, 0.0),
                     Point3::<f32>::new(0.0, 0.0, 0.0),
                     // z
                     Point3::<f32>::new(0.0, 0.0, size.z),
                     Point3::<f32>::new(size.x, 0.0, size.z),
+                    Point3::<f32>::new(size.x, 0.0, size.z),
                     Point3::<f32>::new(size.x, size.y, size.z),
+                    Point3::<f32>::new(size.x, size.y, size.z),
+                    Point3::<f32>::new(0.0, size.y, size.z),
                     Point3::<f32>::new(0.0, size.y, size.z),
                     Point3::<f32>::new(0.0, 0.0, size.z),
                 ];
@@ -512,7 +517,7 @@ impl Perspective {
                 reference_cube
                     .iter_mut()
                     .for_each(|item| item.coords += min.coords);
-
+                trace!("reference_cube {:?}", reference_cube);
                 self.image_state
                     .as_mut()
                     .unwrap()
@@ -947,21 +952,6 @@ impl Perspective {
                                 .to_radians(),
                         ));
                 }
-                // use cv::Consensus;
-                // // Estimate potential poses with P3P.
-                // // Arrsac should use the fourth point to filter and find only one model from the 4 generated.
-                // let mut arrsac = Arrsac::new(1e-6, SmallRng::seed_from_u64(0));
-                // if let Some(pose) = arrsac.model(&LambdaTwist::new(), features.iter().cloned()) {
-                //     info!("pose: {:?}", pose.0);
-                //     info!(
-                //         "pose: rotation: {} {} {}",
-                //         pose.0.rotation.transpose().euler_angles().0.to_degrees(),
-                //         pose.0.rotation.transpose().euler_angles().1.to_degrees(),
-                //         pose.0.rotation.transpose().euler_angles().2.to_degrees()
-                //     );
-                // } else {
-                //     info!("no solution found");
-                // }
             }
             Message::EditPoint(index, edit_component_message) => match index {
                 0 => match self

@@ -32,7 +32,7 @@ where
     width: Length,
     height: Length,
     message_: PhantomData<Message>,
-    cache: geometry::Cache<Renderer>,
+    referece_cub_cache: geometry::Cache<Renderer>,
     twist_points_cache: geometry::Cache<Renderer>,
 
     compute_solution: RefCell<Option<ComputeSolution<f32>>>,
@@ -61,7 +61,7 @@ where
             message_: PhantomData,
             renderer_: PhantomData,
             theme_: PhantomData,
-            cache: geometry::Cache::default(),
+            referece_cub_cache: geometry::Cache::default(),
             twist_points_cache: geometry::Cache::default(),
             reference_cub,
             image_size: Size::default(),
@@ -147,44 +147,43 @@ where
         bounds: Rectangle,
         _cursor: mouse::Cursor,
     ) -> Vec<Renderer::Geometry> {
-        let draw = self.cache.draw(renderer, bounds.size(), |frame| {
-            if self.compute_solution.borrow().as_ref().is_none() {
-                return;
-            }
+        let referece_cub_cache = self
+            .referece_cub_cache
+            .draw(renderer, bounds.size(), |frame| {
+                if self.compute_solution.borrow().as_ref().is_none() {
+                    return;
+                }
 
-            *state.reference_cub_2d.borrow_mut() = self
-                .compute_solution
-                .borrow()
-                .as_ref()
-                .unwrap()
-                .calculate_location_position_to_2d_frustum(&self.reference_cub.as_ref().borrow())
-                .iter()
-                .map(|&(start, end)| {
-                    let start = to_canvas(bounds.size(), &start.coords.xy());
-                    let end = to_canvas(bounds.size(), &end.coords.xy());
-                    (Point::new(start.x, start.y), Point::new(end.x, end.y))
-                })
-                .collect();
+                let mut builder = canvas::path::Builder::new();
 
-            let mut builder = canvas::path::Builder::new();
-            state
-                .reference_cub_2d
-                .borrow()
-                .iter()
-                .for_each(|&(start, end)| {
-                    builder.move_to(start);
-                    builder.line_to(end);
-                });
-            let path = builder.build();
-            frame.stroke(
-                &path,
-                Stroke {
-                    style: canvas::Style::Solid(Color::from_rgba(0.9, 0.7, 0.7, 1.0)),
-                    width: 1.0,
-                    ..Stroke::default()
-                },
-            );
-        });
+                self.reference_cub
+                    .as_ref()
+                    .borrow()
+                    .chunks(2)
+                    .for_each(|points| {
+                        self.compute_solution
+                            .borrow()
+                            .as_ref()
+                            .unwrap()
+                            .calculate_location_position_to_2d_frustum(&points)
+                            .iter()
+                            .for_each(|&(start, end)| {
+                                let start = to_canvas(bounds.size(), &start.coords.xy());
+                                let end = to_canvas(bounds.size(), &end.coords.xy());
+                                builder.move_to(Point::new(start.x, start.y));
+                                builder.line_to(Point::new(end.x, end.y));
+                            });
+                    });
+                let path = builder.build();
+                frame.stroke(
+                    &path,
+                    Stroke {
+                        style: canvas::Style::Solid(Color::from_rgba(0.9, 0.7, 0.7, 1.0)),
+                        width: 1.0,
+                        ..Stroke::default()
+                    },
+                );
+            });
 
         let twist_point = self
             .twist_points_cache
@@ -273,7 +272,7 @@ where
                 };
             });
 
-        vec![twist_point, draw]
+        vec![twist_point, referece_cub_cache]
     }
 }
 
@@ -376,7 +375,6 @@ pub struct State {
     pub selected: usize,
     pub edit: Option<Component>,
     pub image_path: String,
-    pub reference_cub_2d: RefCell<Vec<(Point, Point)>>,
     pub captured: Option<Vector>,
     pub vanishing_points: RefCell<(Vector2<f32>, Vector2<f32>, Vector2<f32>)>,
     pub selected_twist_point: Option<usize>,

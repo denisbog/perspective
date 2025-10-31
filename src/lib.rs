@@ -136,15 +136,15 @@ impl Default for AxisData {
             custom_origin_translation: None,
             custom_scale: None,
             twist_points: Some(vec![
-                Point3::new(7.54, 0.0, 0.0),
-                Point3::new(3.14, 0.0, 2.4),
-                Point3::new(3.57, 3.61, 0.0),
+                Point3::new(1.0, 0.0, 0.0),
+                Point3::new(0.0, 1.0, 0.0),
+                Point3::new(0.0, 0.0, 0.0),
             ]),
 
             twist_points_2d: Some(vec![
-                Point2::new(0.5, 0.5),
-                Point2::new(0.5, 0.5),
-                Point2::new(0.5, 0.5),
+                Point2::new(0.4, 0.6),
+                Point2::new(0.6, 0.6),
+                Point2::new(0.5, 0.4),
             ]),
             field_of_view: Some(102.0),
         }

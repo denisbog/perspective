@@ -98,7 +98,7 @@ pub mod data {
 
         pub fn calculate_location_position_to_2d_frustum(
             &self,
-            location3d_points: &Vec<Point3<T>>,
+            location3d_points: &[Point3<T>],
         ) -> Vec<(Point3<T>, Point3<T>)> {
             let perspective = Perspective3::new(
                 T::from(1.0).unwrap(),
