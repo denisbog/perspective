@@ -107,11 +107,11 @@ pub mod data {
                 T::from(1000.0).unwrap(),
             );
 
-            let mut matrix = perspective.into_inner();
-            *matrix.index_mut((0, 2)) = -self.ortho_center.x;
-            *matrix.index_mut((1, 2)) = -self.ortho_center.y;
+            let mut perspective_matrix = perspective.into_inner();
+            *perspective_matrix.index_mut((0, 2)) = -self.ortho_center.x;
+            *perspective_matrix.index_mut((1, 2)) = -self.ortho_center.y;
 
-            let frustum = crate::frustum::Frustum::from_matrix(&matrix);
+            let frustum = crate::frustum::Frustum::from_matrix(&perspective_matrix);
             let location3d_points = location3d_points
                 .iter()
                 .map(|item| self.view_transform * item.to_homogeneous())
@@ -125,8 +125,9 @@ pub mod data {
                 })
                 .map(|(start, end)| {
                     (
-                        matrix * Point3::new(start.x, start.y, start.z).to_homogeneous(),
-                        matrix * Point3::new(end.x, end.y, end.z).to_homogeneous(),
+                        perspective_matrix
+                            * Point3::new(start.x, start.y, start.z).to_homogeneous(),
+                        perspective_matrix * Point3::new(end.x, end.y, end.z).to_homogeneous(),
                     )
                 })
                 .map(|(start, end)| {

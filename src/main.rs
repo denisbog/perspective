@@ -251,35 +251,6 @@ impl Perspective {
             }
             Message::CalculatePose => {
                 info!("does nothing");
-                // let Some(axis_data) = &self.image_state.unwrap().axis_data else {
-                //     return;
-                // };
-                // let lines_x = [
-                //     axis_data.borrow().axis_lines[0],
-                //     axis_data.borrow().axis_lines[1],
-                // ];
-                // let lines_y = [
-                //     axis_data.borrow().axis_lines[2],
-                //     axis_data.borrow().axis_lines[3],
-                // ];
-                // let lines_z = [
-                //     axis_data.borrow().axis_lines[4],
-                //     axis_data.borrow().axis_lines[5],
-                // ];
-                // let control_point = &axis_data.borrow().control_point;
-                // self.image_state.unwrap().compute_solution = Some(
-                //     compute_ui_adapter(
-                //         lines_x,
-                //         lines_y,
-                //         lines_z,
-                //         self.image_state.unwrap().image_size,
-                //         control_point,
-                //         axis_data.borrow().flip,
-                //         &axis_data.borrow().custom_origin_translation,
-                //         &axis_data.borrow().custom_scale,
-                //     )
-                //     .unwrap(),
-                // );
             }
             Message::CalculatePoseUsingVanishingPoint => {
                 let Some(axis_data) = &self.image_state.as_ref().unwrap().axis_data else {
@@ -414,115 +385,7 @@ impl Perspective {
                 } else {
                     102.0
                 };
-                let first = self
-                    .image_state
-                    .as_ref()
-                    .unwrap()
-                    .twist_points
-                    .borrow()
-                    .first()
-                    .unwrap()
-                    .clone();
-                let min = self
-                    .image_state
-                    .as_ref()
-                    .unwrap()
-                    .twist_points
-                    .borrow()
-                    .iter()
-                    .skip(1)
-                    .fold(first, |mut acc, item| {
-                        if acc.x > item.x {
-                            acc.x = item.x;
-                        }
-                        if acc.y > item.y {
-                            acc.y = item.y;
-                        }
-                        if acc.z > item.z {
-                            acc.z = item.z;
-                        }
-                        acc
-                    });
-                let first = self
-                    .image_state
-                    .as_ref()
-                    .unwrap()
-                    .twist_points
-                    .borrow()
-                    .first()
-                    .unwrap()
-                    .clone();
-                let max = self
-                    .image_state
-                    .as_ref()
-                    .unwrap()
-                    .twist_points
-                    .borrow()
-                    .iter()
-                    .skip(1)
-                    .fold(first, |mut acc, item| {
-                        if acc.x < item.x {
-                            acc.x = item.x;
-                        }
-                        if acc.y < item.y {
-                            acc.y = item.y;
-                        }
-                        if acc.z < item.z {
-                            acc.z = item.z;
-                        }
-                        acc
-                    });
-
-                info!("min {}, max {}", min, max);
-                let mut size = max - min;
-                if size.x == 0.0 {
-                    size.x = 1.0
-                }
-                if size.y == 0.0 {
-                    size.y = 1.0
-                }
-                if size.z == 0.0 {
-                    size.z = 1.0
-                }
-                let mut reference_cube = vec![
-                    Point3::<f32>::new(0.0, 0.0, 0.0),
-                    Point3::<f32>::new(size.x, 0.0, 0.0),
-                    Point3::<f32>::new(size.x, 0.0, 0.0),
-                    Point3::<f32>::new(size.x, size.y, 0.0),
-                    Point3::<f32>::new(size.x, size.y, 0.0),
-                    Point3::<f32>::new(0.0, size.y, 0.0),
-                    Point3::<f32>::new(0.0, size.y, 0.0),
-                    Point3::<f32>::new(0.0, 0.0, 0.0),
-                    // z
-                    Point3::<f32>::new(0.0, 0.0, size.z),
-                    Point3::<f32>::new(size.x, 0.0, size.z),
-                    Point3::<f32>::new(size.x, 0.0, size.z),
-                    Point3::<f32>::new(size.x, size.y, size.z),
-                    Point3::<f32>::new(size.x, size.y, size.z),
-                    Point3::<f32>::new(0.0, size.y, size.z),
-                    Point3::<f32>::new(0.0, size.y, size.z),
-                    Point3::<f32>::new(0.0, 0.0, size.z),
-                ];
-
-                for i in 0..=size.y as usize {
-                    reference_cube.push(Point3::<f32>::new(0.0, 0.0 + i as f32, 0.0));
-                    reference_cube.push(Point3::<f32>::new(size.x, 0.0 + i as f32, 0.0));
-                }
-
-                for i in 0..=size.x as usize {
-                    reference_cube.push(Point3::<f32>::new(0.0 + i as f32, 0.0, 0.0));
-                    reference_cube.push(Point3::<f32>::new(0.0 + i as f32, size.y, 0.0));
-                }
-
-                reference_cube
-                    .iter_mut()
-                    .for_each(|item| item.coords += min.coords);
-                trace!("reference_cube {:?}", reference_cube);
-                self.image_state
-                    .as_mut()
-                    .unwrap()
-                    .reference_cube
-                    .replace(reference_cube);
+                self.refresh_reference_cub();
                 let twist_points = self
                     .image_state
                     .as_ref()
@@ -952,6 +815,7 @@ impl Perspective {
                                 .to_radians(),
                         ));
                 }
+                self.refresh_reference_cub();
             }
             Message::EditPoint(index, edit_component_message) => match index {
                 0 => match self
@@ -1014,6 +878,118 @@ impl Perspective {
             }
             Message::NoImage => {}
         }
+    }
+
+    fn refresh_reference_cub(&mut self) {
+        let first = self
+            .image_state
+            .as_ref()
+            .unwrap()
+            .twist_points
+            .borrow()
+            .first()
+            .unwrap()
+            .clone();
+        let min = self
+            .image_state
+            .as_ref()
+            .unwrap()
+            .twist_points
+            .borrow()
+            .iter()
+            .skip(1)
+            .fold(first, |mut acc, item| {
+                if acc.x > item.x {
+                    acc.x = item.x;
+                }
+                if acc.y > item.y {
+                    acc.y = item.y;
+                }
+                if acc.z > item.z {
+                    acc.z = item.z;
+                }
+                acc
+            });
+        let first = self
+            .image_state
+            .as_ref()
+            .unwrap()
+            .twist_points
+            .borrow()
+            .first()
+            .unwrap()
+            .clone();
+        let max = self
+            .image_state
+            .as_ref()
+            .unwrap()
+            .twist_points
+            .borrow()
+            .iter()
+            .skip(1)
+            .fold(first, |mut acc, item| {
+                if acc.x < item.x {
+                    acc.x = item.x;
+                }
+                if acc.y < item.y {
+                    acc.y = item.y;
+                }
+                if acc.z < item.z {
+                    acc.z = item.z;
+                }
+                acc
+            });
+
+        info!("min {}, max {}", min, max);
+        let mut size = max - min;
+        if size.x == 0.0 {
+            size.x = 1.0
+        }
+        if size.y == 0.0 {
+            size.y = 1.0
+        }
+        if size.z == 0.0 {
+            size.z = 1.0
+        }
+        let mut reference_cube = vec![
+            Point3::<f32>::new(0.0, 0.0, 0.0),
+            Point3::<f32>::new(size.x, 0.0, 0.0),
+            Point3::<f32>::new(size.x, 0.0, 0.0),
+            Point3::<f32>::new(size.x, size.y, 0.0),
+            Point3::<f32>::new(size.x, size.y, 0.0),
+            Point3::<f32>::new(0.0, size.y, 0.0),
+            Point3::<f32>::new(0.0, size.y, 0.0),
+            Point3::<f32>::new(0.0, 0.0, 0.0),
+            // z
+            Point3::<f32>::new(0.0, 0.0, size.z),
+            Point3::<f32>::new(size.x, 0.0, size.z),
+            Point3::<f32>::new(size.x, 0.0, size.z),
+            Point3::<f32>::new(size.x, size.y, size.z),
+            Point3::<f32>::new(size.x, size.y, size.z),
+            Point3::<f32>::new(0.0, size.y, size.z),
+            Point3::<f32>::new(0.0, size.y, size.z),
+            Point3::<f32>::new(0.0, 0.0, size.z),
+        ];
+
+        for i in 0..=size.y as usize {
+            reference_cube.push(Point3::<f32>::new(0.0, 0.0 + i as f32, 0.0));
+            reference_cube.push(Point3::<f32>::new(size.x, 0.0 + i as f32, 0.0));
+        }
+
+        for i in 0..=size.x as usize {
+            reference_cube.push(Point3::<f32>::new(0.0 + i as f32, 0.0, 0.0));
+            reference_cube.push(Point3::<f32>::new(0.0 + i as f32, size.y, 0.0));
+        }
+
+        reference_cube
+            .iter_mut()
+            .for_each(|item| item.coords += min.coords);
+        trace!("reference_cube {:?}", reference_cube);
+        self.image_state
+            .as_mut()
+            .unwrap()
+            .reference_cube
+            .replace(reference_cube);
     }
     fn view(&self) -> Element<'_, Message> {
         let Some(image_state) = self.image_state.as_ref() else {
