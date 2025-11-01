@@ -15,7 +15,7 @@ use perspective::camera_pose_all::ComputeCameraPose;
 use perspective::compute::data::ComputeSolution;
 use perspective::compute::{
     Lines, StoreLine, StorePoint, StorePoint3d, compute_camera_pose_scale, compute_ui_adapter,
-    read_points_from_file, store_scene_data_to_file,
+    store_scene_data_to_file,
 };
 use perspective::optimize::{
     ortho_center_optimize, ortho_center_optimize_x, ortho_center_optimize_y,
@@ -85,7 +85,6 @@ enum UiMod {
 #[derive(Debug, Clone)]
 enum Message {
     Save,
-    LoadLines,
     CalculatePose,
     LoadApplicationState {
         image_data: Option<ImageData>,
@@ -185,11 +184,11 @@ impl Perspective {
             ]));
 
             let editor_component_1 =
-                EditorComponent::new("Point #1", &twist_points.borrow().get(0).unwrap());
+                EditorComponent::new("Point #1", twist_points.borrow().first().unwrap());
             let editor_component_2 =
-                EditorComponent::new("Point #2", &twist_points.borrow().get(1).unwrap());
+                EditorComponent::new("Point #2", twist_points.borrow().get(1).unwrap());
             let editor_component_3 =
-                EditorComponent::new("Point #3", &twist_points.borrow().get(2).unwrap());
+                EditorComponent::new("Point #3", twist_points.borrow().get(2).unwrap());
             let image_state = ImageState {
                 image_path: first_image.clone(),
                 draw_lines,
@@ -238,16 +237,6 @@ impl Perspective {
                         .unwrap();
                 let out = <Lines as From<&Perspective>>::from(self);
                 file.write_all(&serde_json::to_vec(&out).unwrap()).unwrap();
-            }
-            Message::LoadLines => {
-                if self.image_state.as_ref().unwrap().axis_data.is_none() {
-                    return;
-                };
-                if let Ok((_, Some(lines))) = read_points_from_file(
-                    &self.image_state.as_ref().unwrap().points_file_name.clone(),
-                ) {
-                    *self.image_state.as_ref().unwrap().draw_lines.borrow_mut() = lines;
-                };
             }
             Message::CalculatePose => {
                 info!("does nothing");
@@ -393,9 +382,9 @@ impl Perspective {
                     .twist_points
                     .borrow()
                     .clone();
-                let point = twist_points.get(0).unwrap();
+                let point = twist_points.first().unwrap();
                 self.image_state.as_mut().unwrap().editor_component_1 =
-                    EditorComponent::new("Point #1", &point);
+                    EditorComponent::new("Point #1", point);
                 let point = twist_points.get(1).unwrap();
                 self.image_state.as_mut().unwrap().editor_component_2 =
                     EditorComponent::new("Point #2", point);
@@ -782,7 +771,7 @@ impl Perspective {
                     .iter()
                     .for_each(|item| info!("solution: {}", item.0.to_homogeneous()));
 
-                if candidates.len() > 0 {
+                if !candidates.is_empty() {
                     let item = candidates.iter().next().unwrap();
                     let solution = item.0.to_homogeneous();
                     info!("using the first solution {solution}");
@@ -881,15 +870,14 @@ impl Perspective {
     }
 
     fn refresh_reference_cub(&mut self) {
-        let first = self
+        let first = *self
             .image_state
             .as_ref()
             .unwrap()
             .twist_points
             .borrow()
             .first()
-            .unwrap()
-            .clone();
+            .unwrap();
         let min = self
             .image_state
             .as_ref()
@@ -910,15 +898,14 @@ impl Perspective {
                 }
                 acc
             });
-        let first = self
+        let first = *self
             .image_state
             .as_ref()
             .unwrap()
             .twist_points
             .borrow()
             .first()
-            .unwrap()
-            .clone();
+            .unwrap();
         let max = self
             .image_state
             .as_ref()
@@ -984,7 +971,6 @@ impl Perspective {
         reference_cube
             .iter_mut()
             .for_each(|item| item.coords += min.coords);
-        trace!("reference_cube {:?}", reference_cube);
         self.image_state
             .as_mut()
             .unwrap()
@@ -1007,7 +993,7 @@ impl Perspective {
 
         let component: Element<Message> = match self.mode {
             UiMod::Pose => ComputeCameraPose::new(
-                Rc::clone(&image_state.axis_data.as_ref().unwrap()),
+                Rc::clone(image_state.axis_data.as_ref().unwrap()),
                 Rc::clone(&self.image_state.as_ref().unwrap().draw_lines),
                 Rc::clone(&self.image_state.as_ref().unwrap().reference_cube),
                 &self.image_state.as_ref().unwrap().compute_solution,
@@ -1359,156 +1345,5 @@ impl From<&Perspective> for Lines {
             custom_origin_tanslation,
             custom_scale,
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::f32::consts::PI;
-
-    use anyhow::Result;
-    use nalgebra::{
-        IsometryMatrix3, Matrix3, Perspective3, Point3, Rotation3, RowVector3, Translation,
-        Vector2, Vector3,
-    };
-    use perspective::{
-        compute::{
-            compute_camera_pose, compute_camera_pose_scale, find_vanishing_point_for_lines,
-            store_scene_data_to_file,
-        },
-        optimize::ortho_center_optimize,
-        utils::relative_to_image_plane,
-    };
-    use tracing::{info, trace};
-    use tracing_subscriber::EnvFilter;
-
-    #[tokio::test]
-    async fn compute_test_new() -> Result<()> {
-        tracing_subscriber::fmt()
-            .with_env_filter(EnvFilter::from_default_env())
-            .init();
-        let points = vec![
-            Vector2::new(0.6746836, 0.5918425),
-            Vector2::new(0.8013924, 0.5004782),
-            Vector2::new(0.50898737, 0.11926863),
-            Vector2::new(0.64367086, 0.078312226),
-            Vector2::new(0.6596202, 0.5918425),
-            Vector2::new(0.52405065, 0.5130802),
-            Vector2::new(0.65607595, 0.08146272),
-            Vector2::new(0.7748101, 0.11139241),
-            Vector2::new(0.66759497, 0.5571871),
-            Vector2::new(0.67556965, 0.19330521),
-            Vector2::new(0.5001266, 0.365007),
-            Vector2::new(0.5001266, 0.13344586),
-        ];
-        let image_width = 1920.0;
-        let image_height = 1080.0;
-        let ratio = image_width / image_height;
-
-        let user_selected_origin = Vector2::new(0.66607594, 0.5972433);
-
-        let axis = Matrix3::from_rows(&[
-            RowVector3::new(-1.0, 0.0, 0.0),
-            RowVector3::new(0.0, -1.0, 0.0),
-            RowVector3::new(0.0, 0.0, -1.0),
-        ]);
-
-        let user_selected_origin = relative_to_image_plane(ratio, &user_selected_origin);
-
-        let vanishing_points = points
-            .chunks(4)
-            .map(|lines| find_vanishing_point_for_lines(&lines[0], &lines[1], &lines[2], &lines[3]))
-            .collect::<Vec<Vector2<f32>>>();
-
-        let vanishing_points = vanishing_points
-            .iter()
-            .map(|point| relative_to_image_plane(ratio, point))
-            .collect::<Vec<Vector2<f32>>>();
-
-        let compute_solution =
-            compute_camera_pose(&vanishing_points, &user_selected_origin, axis).unwrap();
-
-        let compute_solution = compute_camera_pose_scale(compute_solution, 1.75).unwrap();
-
-        store_scene_data_to_file(
-            &compute_solution,
-            image_width as u32,
-            image_height as u32,
-            "newperspective.jpg".into(),
-            "newperspective.jpg.test.fspy".into(),
-        )
-        .await
-        .unwrap();
-
-        let rot = Rotation3::from_euler_angles(
-            72.8799f64.to_radians(),
-            0.048048f64.to_radians(),
-            135.469f64.to_radians(),
-        );
-
-        let trans = Translation::from(Vector3::new(4.25837, 3.30374, 2.07094));
-        let initial_pose = IsometryMatrix3::from_parts(trans, rot);
-        info!("transform matrix: {}", initial_pose.to_matrix());
-
-        Ok(())
-    }
-    #[tokio::test]
-    async fn optimize() -> Result<()> {
-        tracing_subscriber::fmt()
-            .with_env_filter(EnvFilter::from_default_env())
-            .init();
-
-        let points = vec![
-            Vector2::new(0.6746836, 0.5918425),
-            Vector2::new(0.8013924, 0.5004782),
-            Vector2::new(0.50898737, 0.11926863),
-            Vector2::new(0.64367086, 0.078312226),
-            Vector2::new(0.6596202, 0.5918425),
-            Vector2::new(0.52405065, 0.5130802),
-            Vector2::new(0.65607595, 0.08146272),
-            Vector2::new(0.7748101, 0.11139241),
-            Vector2::new(0.66759497, 0.5571871),
-            Vector2::new(0.67556965, 0.19330521),
-            Vector2::new(0.5001266, 0.365007),
-            Vector2::new(0.5001266, 0.13344586),
-        ];
-
-        let image_width = 1920.0;
-        let image_height = 1080.0;
-        let ratio = image_width / image_height;
-        let points = ortho_center_optimize(ratio, points);
-        trace!("solution: {:?}", points);
-        Ok(())
-    }
-    #[tokio::test]
-    async fn space_convertion() -> Result<()> {
-        tracing_subscriber::fmt()
-            .with_env_filter(EnvFilter::from_default_env())
-            .init();
-        let point = relative_to_image_plane(1.33, &Vector2::new(0.0, 0.0));
-        trace!("point {point}");
-        let point = relative_to_image_plane(1.33, &Vector2::new(0.5, 0.5));
-        trace!("point {point}");
-        let point = relative_to_image_plane(1.33, &Vector2::new(1.0, 1.0));
-        trace!("point {point}");
-        Ok(())
-    }
-    #[tokio::test]
-    async fn matrix_test() -> Result<()> {
-        tracing_subscriber::fmt()
-            .with_env_filter(EnvFilter::from_default_env())
-            .init();
-
-        let perspective = Perspective3::new(1.0, PI / 2.0, 0.01, 10000.0);
-        let point = Point3::new(100.0, 100.0, 100.0);
-        let point = perspective.into_inner() * point.to_homogeneous();
-        let point = Point3::from_homogeneous(point);
-        trace!("point {:?}", point);
-        let perspective = Perspective3::new(1.0f64, (PI as f64) / 2.0f64, 0.01f64, 10000.0f64);
-        let point = Point3::new(100.0f64, 100.0f64, 100.0f64);
-        let point = perspective.into_inner() * point.to_homogeneous();
-        let point = Point3::from_homogeneous(point);
-        trace!("point {:?}", point);
-        Ok(())
     }
 }

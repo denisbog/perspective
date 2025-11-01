@@ -396,7 +396,7 @@ where
                         {
                             return (Status::Captured, None);
                         }
-                        return (Status::Ignored, None);
+                        (Status::Ignored, None)
                     }
                     Edit::None => {
                         if state.edit.is_some() {
@@ -1035,48 +1035,49 @@ where
                     if let Some(_position) = cursor.position() {
                         let current_cursor = cursor.position().unwrap() - bounds.position();
                         let mut builder = canvas::path::Builder::new();
-                        self.vanishing_points.borrow().iter().cloned().for_each(
-                            |(axis, current_cursor)| match axis {
+                        self.vanishing_points
+                            .borrow()
+                            .iter()
+                            .for_each(|(axis, current_cursor)| match axis {
                                 EditAxis::EditX => {
                                     builder.move_to(scale_point_to_canvas(
                                         &Point::new(vanishing_point_x.x, vanishing_point_x.y),
                                         bounds.size(),
                                     ));
-                                    builder.line_to(current_cursor);
+                                    builder.line_to(*current_cursor);
                                 }
                                 EditAxis::EditY => {
                                     builder.move_to(scale_point_to_canvas(
                                         &Point::new(vanishing_point_y.x, vanishing_point_y.y),
                                         bounds.size(),
                                     ));
-                                    builder.line_to(current_cursor);
+                                    builder.line_to(*current_cursor);
                                 }
                                 EditAxis::EditZ => {
                                     builder.move_to(scale_point_to_canvas(
                                         &Point::new(vanishing_point_z.x, vanishing_point_z.y),
                                         bounds.size(),
                                     ));
-                                    builder.line_to(current_cursor);
+                                    builder.line_to(*current_cursor);
                                 }
                                 EditAxis::None => {
                                     builder.move_to(scale_point_to_canvas(
                                         &Point::new(vanishing_point_x.x, vanishing_point_x.y),
                                         bounds.size(),
                                     ));
-                                    builder.line_to(current_cursor);
+                                    builder.line_to(*current_cursor);
                                     builder.move_to(scale_point_to_canvas(
                                         &Point::new(vanishing_point_y.x, vanishing_point_y.y),
                                         bounds.size(),
                                     ));
-                                    builder.line_to(current_cursor);
+                                    builder.line_to(*current_cursor);
                                     builder.move_to(scale_point_to_canvas(
                                         &Point::new(vanishing_point_z.x, vanishing_point_z.y),
                                         bounds.size(),
                                     ));
-                                    builder.line_to(current_cursor);
+                                    builder.line_to(*current_cursor);
                                 }
-                            },
-                        );
+                            });
 
                         match state.edit_state {
                             Edit::VanishingLines(EditAxis::EditX) => {
@@ -1138,17 +1139,12 @@ where
             .draw_lines_cache
             .draw(renderer, bounds.size(), |frame| {
                 let mut builder = canvas::path::Builder::new();
-                state
-                    .points
-                    .borrow()
-                    .windows(2)
-                    .enumerate()
-                    .for_each(|(_index, items)| {
-                        let start = items[0];
-                        let end = items[1];
-                        builder.move_to(start);
-                        builder.line_to(end);
-                    });
+                state.points.borrow().windows(2).for_each(|items| {
+                    let start = items[0];
+                    let end = items[1];
+                    builder.move_to(start);
+                    builder.line_to(end);
+                });
                 let path = builder.build();
                 frame.stroke(
                     &path,
@@ -1400,7 +1396,7 @@ where
     }
 }
 
-impl<'a, Message, Theme, Renderer> Widget<Message, Theme, Renderer>
+impl<Message, Theme, Renderer> Widget<Message, Theme, Renderer>
     for ComputeCameraPose<Message, Theme, Renderer>
 where
     Renderer: geometry::Renderer,

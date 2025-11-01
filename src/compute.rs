@@ -240,26 +240,18 @@ pub fn read_points_from_file(points: &String) -> Result<(AxisData, Option<Vec<Ve
         .map(|item| Vector3::new(item.x, item.y, item.z));
 
     let custom_scale = data.custom_scale;
-    let twist_points = if let Some(twist_points) = data.twist_points {
-        Some(
-            twist_points
-                .iter()
-                .map(|item| Point3::new(item.x, item.y, item.z))
-                .collect(),
-        )
-    } else {
-        None
-    };
-    let twist_points_2d = if let Some(twist_points_2d) = data.twist_points_2d {
-        Some(
-            twist_points_2d
-                .iter()
-                .map(|item| Point2::new(item.x, item.y))
-                .collect(),
-        )
-    } else {
-        None
-    };
+    let twist_points = data.twist_points.map(|twist_points| {
+        twist_points
+            .iter()
+            .map(|item| Point3::new(item.x, item.y, item.z))
+            .collect()
+    });
+    let twist_points_2d = data.twist_points_2d.map(|twist_points_2d| {
+        twist_points_2d
+            .iter()
+            .map(|item| Point2::new(item.x, item.y))
+            .collect()
+    });
     let field_of_view = data.field_of_view;
     Ok((
         AxisData {

@@ -119,7 +119,7 @@ where
             Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
                 state.selected_twist_point = None;
                 self.twist_points_cache.clear();
-                return Status::Captured;
+                Status::Captured
             }
 
             Event::Mouse(mouse::Event::CursorMoved { position: _ }) => {
@@ -165,7 +165,7 @@ where
                             .borrow()
                             .as_ref()
                             .unwrap()
-                            .calculate_location_position_to_2d_frustum(&points)
+                            .calculate_location_position_to_2d_frustum(points)
                             .iter()
                             .for_each(|&(start, end)| {
                                 let start = to_canvas(bounds.size(), &start.coords.xy());
@@ -194,11 +194,11 @@ where
                         let item =
                             scale_point_to_canvas(&Point::new(item.x, item.y), bounds.size());
                         let mut builder = canvas::path::Builder::new();
-                        builder.circle(item.clone(), 5.0);
+                        builder.circle(item, 5.0);
                         let path = builder.build();
                         frame.fill_rectangle(
                             Point::new(item.x + 2.0, item.y + 2.0),
-                            Size::new(120.0, 15.0),
+                            Size::new(100.0, 15.0),
                             Fill {
                                 style: canvas::Style::Solid(Color::from_rgba(0.3, 0.3, 0.3, 0.9)),
                                 ..Fill::default()
@@ -208,7 +208,7 @@ where
                         if let Some(twist_point) = self.twist_points.borrow().get(selected) {
                             frame.fill_text(Text {
                                 content: format!(
-                                    "{:>7.3},{:>7.3},{:>7.3}",
+                                    "{:>7.2},{:>7.2},{:>7.2}",
                                     twist_point.x, twist_point.y, twist_point.z
                                 ),
                                 position: Point::new(item.x + 4.0, item.y + 4.0),
@@ -235,7 +235,7 @@ where
                             let item =
                                 scale_point_to_canvas(&Point::new(item.x, item.y), bounds.size());
                             let mut builder = canvas::path::Builder::new();
-                            builder.circle(item.clone(), 5.0);
+                            builder.circle(item, 5.0);
                             let path = builder.build();
                             frame.fill_rectangle(
                                 Point::new(item.x + 2.0, item.y + 2.0),
@@ -276,7 +276,7 @@ where
     }
 }
 
-impl<'a, Message, Theme, Renderer> Widget<Message, Theme, Renderer>
+impl<Message, Theme, Renderer> Widget<Message, Theme, Renderer>
     for ComputeCameraPoseTwist<Message, Theme, Renderer>
 where
     Renderer: geometry::Renderer,

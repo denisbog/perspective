@@ -27,7 +27,6 @@ tracing = "0.1.41"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 zoomer = {path = "components/zoomer"}
 lambda-twist = "0.7.0"
-#rand = { version = "0.9.2", features = ["small_rng"] }
 cv-pinhole = { version = "0.6.0" }
 cv-core = "0.15"
 arrayvec = "0.5.2"
@@ -38,14 +37,10 @@ rfd = "0.15.4"
 rand = { version = "0.8.4", features = ["small_rng"] }
 
 [workspace]
-members=["components/*", "feature-matching"]
+members=["components/*"]
 
 [workspace.dependencies]
 iced = { git = "https://github.com/iced-rs/iced.git", branch = "master", features = ["debug", "tokio", "canvas", "image", "advanced"] }
-#iced = {  version = "0.13.1", features = ["debug", "tokio", "canvas", "image", "advanced"] }
 tracing = "0.1.41"
 nalgebra = "0.34.1"
 num-traits = "0.2.19"
-#[profile.dev.package."*"]
-#inherits = "release"
-#opt-level = 3

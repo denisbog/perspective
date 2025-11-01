@@ -210,7 +210,11 @@ impl Example {
         let content = column![
             title,
             row![load_btn, save_btn].spacing(10),
-            row![img_widget.width(Length::Fill), sliders.width(300.0)].spacing(20),
+            row![
+                img_widget.width(Length::Fill).height(Length::Fill),
+                sliders.width(300.0)
+            ]
+            .spacing(20),
         ]
         .spacing(10.0);
 

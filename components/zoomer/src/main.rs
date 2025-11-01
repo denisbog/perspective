@@ -16,7 +16,7 @@ impl Example {
         match message {}
     }
 
-    fn view(&self) -> Element<Message> {
+    fn view<'a>(&'a self) -> Element<'a, Message> {
         let content = column!(zoomer(Handle::from_path("perspective.jpg")))
             .padding(20)
             .spacing(20)

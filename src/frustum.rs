@@ -87,17 +87,3 @@ pub fn clip_line_frustum<T: RealField + Float>(
     }
     Some((p0, p1))
 }
-
-fn main() {
-    let vp = Matrix4::<f32>::identity(); // your real view * projection matrix
-    let frustum = Frustum::from_matrix(&vp);
-
-    let p0 = Vector3::new(-10.0, 0.0, -5.0);
-    let p1 = Vector3::new(10.0, 0.0, -5.0);
-
-    if let Some((clipped0, clipped1)) = clip_line_frustum(&frustum, p0, p1) {
-        println!("Visible segment: {:?} -> {:?}", clipped0, clipped1);
-    } else {
-        println!("Line completely outside");
-    }
-}
