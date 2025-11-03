@@ -1,19 +1,15 @@
-pub mod camera_pose_all;
 pub mod compute;
 pub mod decoder;
-pub mod draw;
-pub mod draw_decoration;
 pub mod encoder;
 pub mod frustum;
 pub mod fspy;
-pub mod optimize;
 pub mod read_state;
 pub mod twist_pose_all;
 pub mod utils;
 use std::fmt::Debug;
 
 use iced::Point;
-use nalgebra::{Point2, Point3, Scalar, Vector2, Vector3};
+use nalgebra::{Point2, Point3, Vector3};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -146,33 +142,6 @@ impl Default for AxisData {
                 Point2::new(0.5, 0.4),
             ]),
             field_of_view: Some(102.0),
-        }
-    }
-}
-
-#[derive(Default, Debug, Clone)]
-pub struct PointInformation<T: Scalar> {
-    pub vector: Vector3<T>,
-    pub source_vector: Vector3<T>,
-    pub point: Vector2<T>,
-    pub axis: EditAxis,
-}
-
-impl From<&PointInformation<f32>> for PointInformation<f64> {
-    fn from(val: &PointInformation<f32>) -> Self {
-        Self {
-            vector: Vector3::new(
-                val.vector.x.into(),
-                val.vector.y.into(),
-                val.vector.z.into(),
-            ),
-            source_vector: Vector3::new(
-                val.source_vector.x.into(),
-                val.source_vector.y.into(),
-                val.source_vector.z.into(),
-            ),
-            point: Vector2::new(val.point.x.into(), val.point.y.into()),
-            axis: val.axis.clone(),
         }
     }
 }

@@ -8,21 +8,14 @@ use iced::widget::scrollable::{Direction, Scrollbar};
 use iced::widget::{
     button, center, column, container, image, mouse_area, row, scrollable, slider, stack, text,
 };
-use iced::{Element, Length, Point, Size, Task, Theme, keyboard};
+use iced::{Element, Length, Size, Task, Theme, keyboard};
 use lambda_twist::LambdaTwist;
 use nalgebra::{Matrix4, Point2, Point3, Vector2, Vector3};
-use perspective::camera_pose_all::ComputeCameraPose;
+use perspective::AxisData;
 use perspective::compute::data::ComputeSolution;
-use perspective::compute::{
-    Lines, StoreLine, StorePoint, StorePoint3d, compute_camera_pose_scale, compute_ui_adapter,
-    store_scene_data_to_file,
-};
-use perspective::optimize::{
-    ortho_center_optimize, ortho_center_optimize_x, ortho_center_optimize_y,
-};
+use perspective::compute::{Lines, StoreLine, StorePoint, StorePoint3d, store_scene_data_to_file};
 use perspective::read_state::{ImageData, load};
 use perspective::twist_pose_all::ComputeCameraPoseTwist;
-use perspective::{AxisData, PointInformation};
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::fmt::Debug;
@@ -40,10 +33,6 @@ use anyhow::Result;
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Cli {
-    #[arg(short, long)]
-    points: Option<String>,
-    #[arg(short, long)]
-    dimension: Option<f32>,
     #[arg(short, long, value_delimiter = ' ', num_args = 0..)]
     images: Vec<String>,
 }
@@ -67,7 +56,6 @@ pub fn main() -> iced::Result {
 
                 match c {
                     "'" => Some(Message::ChangeMode(UiMod::Twist)),
-                    "y" => Some(Message::ChangeMode(UiMod::Pose)),
                     _ => None,
                 }
             })
@@ -77,7 +65,6 @@ pub fn main() -> iced::Result {
 
 #[derive(Default, Clone, Debug)]
 enum UiMod {
-    Pose,
     #[default]
     Twist,
 }
@@ -91,21 +78,11 @@ enum Message {
         image_size: Size<u32>,
     },
     SelectImage(u8),
-    Flip(bool, bool, bool),
-    ApplyScale,
-    ResetScale,
-    ApplyTranslation,
-    ResetTranslation,
     ChangeMode(UiMod),
     ExportToFSpy,
-    Optimize,
     ZoomChanged(f32),
     FieldOfViewChanged(f32),
-    ScaleToDimension,
-    OptimizeX,
     PoseLambdaTwist,
-    OptimizeY,
-    CalculatePoseUsingVanishingPoint,
     EditPoint(usize, zoomer::editor_component::Message),
     LoadImage,
     NoImage,
@@ -129,11 +106,7 @@ struct ImageState {
     draw_lines: Rc<RefCell<Vec<Vector3<f32>>>>,
     reference_cube: Rc<RefCell<Vec<Point3<f32>>>>,
     selected_image: u8,
-    custom_origin_translation: Rc<RefCell<Option<Vector3<f32>>>>,
-    custom_scale_segment: Rc<RefCell<Option<usize>>>,
-    custom_scale: Rc<RefCell<Option<PointInformation<f32>>>>,
     zoom: f32,
-    dimension: Option<f32>,
     twist_points: Rc<RefCell<Vec<Point3<f32>>>>,
     twist_points_2d: Rc<RefCell<Vec<Point2<f32>>>>,
     editor_component_1: EditorComponent,
@@ -161,14 +134,9 @@ impl Perspective {
                 .unwrap()
                 .to_str()
                 .unwrap();
-            let points = if args.points.is_none() {
-                let parent = Path::new(&first_image).parent().unwrap().to_str().unwrap();
-                format!("{parent}/{image_name}.points")
-            } else {
-                args.points.unwrap()
-            };
+            let parent = Path::new(&first_image).parent().unwrap().to_str().unwrap();
+            let points = format!("{parent}/{image_name}.points");
             let export_file_name = format!("{}.fspy", image_name);
-            let dimension = args.dimension;
             let reference_cub = Rc::new(RefCell::new(vec![Point3::<f32>::new(0.0, 0.0, 0.0)]));
 
             let twist_points = Rc::new(RefCell::new(vec![
@@ -196,7 +164,6 @@ impl Perspective {
                 export_file_name,
                 points_file_name: points.clone(),
                 zoom: 0.5,
-                dimension,
                 twist_points,
                 twist_points_2d,
                 editor_component_1,
@@ -240,82 +207,6 @@ impl Perspective {
             }
             Message::CalculatePose => {
                 info!("does nothing");
-            }
-            Message::CalculatePoseUsingVanishingPoint => {
-                let Some(axis_data) = &self.image_state.as_ref().unwrap().axis_data else {
-                    return;
-                };
-                let lines_x = [
-                    axis_data.borrow().axis_lines[0],
-                    axis_data.borrow().axis_lines[1],
-                ];
-                let lines_y = [
-                    axis_data.borrow().axis_lines[2],
-                    axis_data.borrow().axis_lines[3],
-                ];
-                let lines_z = [
-                    axis_data.borrow().axis_lines[4],
-                    axis_data.borrow().axis_lines[5],
-                ];
-                let compute_solution = Some(
-                    compute_ui_adapter(
-                        lines_x,
-                        lines_y,
-                        lines_z,
-                        self.image_state.as_ref().unwrap().image_size,
-                        &axis_data.borrow().control_point,
-                        axis_data.borrow().flip,
-                        &axis_data.borrow().custom_origin_translation,
-                        &axis_data.borrow().custom_scale,
-                    )
-                    .unwrap(),
-                );
-                self.image_state.as_mut().unwrap().compute_solution = compute_solution;
-            }
-            Message::ScaleToDimension => {
-                if self
-                    .image_state
-                    .as_ref()
-                    .unwrap()
-                    .compute_solution
-                    .is_some()
-                {
-                    let Some(custom_scale) = self
-                        .image_state
-                        .as_ref()
-                        .unwrap()
-                        .custom_scale
-                        .borrow()
-                        .clone()
-                    else {
-                        return;
-                    };
-                    let solution = self
-                        .image_state
-                        .as_ref()
-                        .unwrap()
-                        .compute_solution
-                        .clone()
-                        .unwrap();
-                    self.image_state.as_mut().unwrap().compute_solution =
-                        if let Some(scale) = self.image_state.as_ref().unwrap().dimension {
-                            let scale =
-                                (custom_scale.source_vector - custom_scale.vector).norm() / scale;
-                            *self.image_state.as_ref().unwrap().custom_scale.borrow_mut() = None;
-                            self.image_state
-                                .as_mut()
-                                .unwrap()
-                                .axis_data
-                                .as_mut()
-                                .unwrap()
-                                .borrow_mut()
-                                .custom_scale
-                                .replace(scale);
-                            compute_camera_pose_scale(solution, scale).ok()
-                        } else {
-                            Some(solution)
-                        };
-                };
             }
             Message::LoadApplicationState {
                 image_data,
@@ -393,14 +284,12 @@ impl Perspective {
                     EditorComponent::new("Point #3", point);
 
                 match self.mode {
-                    UiMod::Pose => self.update(Message::CalculatePoseUsingVanishingPoint),
                     UiMod::Twist => self.update(Message::PoseLambdaTwist),
                 }
             }
             Message::ChangeMode(mode) => {
                 self.mode = mode;
                 match self.mode {
-                    UiMod::Pose => self.update(Message::CalculatePoseUsingVanishingPoint),
                     UiMod::Twist => self.update(Message::PoseLambdaTwist),
                 }
             }
@@ -438,123 +327,6 @@ impl Perspective {
                 })));
                 self.update(Message::CalculatePose);
             }
-            Message::Flip(flip_x, flip_y, flip_z) => {
-                let Some(axis_data) = &self.image_state.as_ref().unwrap().axis_data else {
-                    return;
-                };
-                axis_data.borrow_mut().flip = (flip_x, flip_y, flip_z);
-                self.update(Message::CalculatePoseUsingVanishingPoint);
-            }
-            Message::ApplyTranslation => {
-                let Some(custom_origin_translation) = *self
-                    .image_state
-                    .as_ref()
-                    .unwrap()
-                    .custom_origin_translation
-                    .borrow()
-                else {
-                    return;
-                };
-                self.image_state
-                    .as_ref()
-                    .unwrap()
-                    .axis_data
-                    .as_ref()
-                    .unwrap()
-                    .borrow_mut()
-                    .custom_origin_translation = Some(custom_origin_translation);
-                self.update(Message::CalculatePoseUsingVanishingPoint);
-            }
-            Message::ResetTranslation => {
-                let Some(axis_data) = &self.image_state.as_ref().unwrap().axis_data else {
-                    return;
-                };
-                axis_data.borrow_mut().custom_origin_translation = None;
-                self.update(Message::CalculatePoseUsingVanishingPoint);
-            }
-            Message::ApplyScale => {
-                let Some(custom_scale) = self
-                    .image_state
-                    .as_ref()
-                    .unwrap()
-                    .custom_scale
-                    .borrow()
-                    .clone()
-                else {
-                    return;
-                };
-                let custom_scale = custom_scale.vector - custom_scale.source_vector;
-
-                let scale = if let Some(custom_scale_segment) = *self
-                    .image_state
-                    .as_ref()
-                    .unwrap()
-                    .custom_scale_segment
-                    .borrow()
-                {
-                    let start = *self
-                        .image_state
-                        .as_ref()
-                        .unwrap()
-                        .draw_lines
-                        .borrow()
-                        .get(custom_scale_segment)
-                        .unwrap();
-                    let end = *self
-                        .image_state
-                        .as_ref()
-                        .unwrap()
-                        .draw_lines
-                        .borrow()
-                        .get(custom_scale_segment + 1)
-                        .unwrap();
-                    let length = start - end;
-                    length.norm()
-                } else {
-                    1.0
-                };
-                let scale = custom_scale.norm() / scale;
-                let scale = if let Some(prev_scale) = self
-                    .image_state
-                    .as_ref()
-                    .unwrap()
-                    .axis_data
-                    .as_ref()
-                    .unwrap()
-                    .borrow()
-                    .custom_scale
-                {
-                    prev_scale * scale
-                } else {
-                    scale
-                };
-                self.image_state
-                    .as_ref()
-                    .unwrap()
-                    .axis_data
-                    .as_ref()
-                    .unwrap()
-                    .borrow_mut()
-                    .custom_scale = Some(scale);
-                self.image_state
-                    .as_ref()
-                    .unwrap()
-                    .custom_scale
-                    .replace(None);
-                self.image_state
-                    .as_ref()
-                    .unwrap()
-                    .custom_scale_segment
-                    .replace(None);
-                self.update(Message::CalculatePoseUsingVanishingPoint);
-            }
-            Message::ResetScale => {
-                let Some(axis_data) = &self.image_state.as_ref().unwrap().axis_data else {
-                    return;
-                };
-                axis_data.borrow_mut().custom_scale = None;
-                self.update(Message::CalculatePoseUsingVanishingPoint);
-            }
             Message::ExportToFSpy => {
                 let Some(compute_solution) = &self.image_state.as_ref().unwrap().compute_solution
                 else {
@@ -576,90 +348,6 @@ impl Perspective {
                     .await;
                     trace!("scene data: {:?}", data);
                 });
-            }
-            Message::Optimize => {
-                let Some(axis_data) = &self.image_state.as_ref().unwrap().axis_data else {
-                    return;
-                };
-                let lines = axis_data
-                    .borrow()
-                    .axis_lines
-                    .iter()
-                    .cloned()
-                    .flat_map(|(a, b)| [Vector2::new(a.x, a.y), Vector2::new(b.x, b.y)])
-                    .collect();
-                if let Ok(lines) = ortho_center_optimize(
-                    self.image_state.as_ref().unwrap().image_size.width
-                        / self.image_state.as_ref().unwrap().image_size.height,
-                    lines,
-                ) {
-                    axis_data.borrow_mut().axis_lines = lines
-                        .chunks(2)
-                        .map(|items| {
-                            (
-                                Point::new(items[0].x, items[0].y),
-                                Point::new(items[1].x, items[1].y),
-                            )
-                        })
-                        .collect();
-                    self.update(Message::CalculatePoseUsingVanishingPoint);
-                };
-            }
-            Message::OptimizeX => {
-                let Some(axis_data) = &self.image_state.as_ref().unwrap().axis_data else {
-                    return;
-                };
-                let lines = axis_data
-                    .borrow()
-                    .axis_lines
-                    .iter()
-                    .cloned()
-                    .flat_map(|(a, b)| [Vector2::new(a.x, a.y), Vector2::new(b.x, b.y)])
-                    .collect();
-                if let Ok(lines) = ortho_center_optimize_x(
-                    self.image_state.as_ref().unwrap().image_size.width
-                        / self.image_state.as_ref().unwrap().image_size.height,
-                    lines,
-                ) {
-                    axis_data.borrow_mut().axis_lines = lines
-                        .chunks(2)
-                        .map(|items| {
-                            (
-                                Point::new(items[0].x, items[0].y),
-                                Point::new(items[1].x, items[1].y),
-                            )
-                        })
-                        .collect();
-                    self.update(Message::CalculatePoseUsingVanishingPoint);
-                };
-            }
-            Message::OptimizeY => {
-                let Some(axis_data) = &self.image_state.as_ref().unwrap().axis_data else {
-                    return;
-                };
-                let lines = axis_data
-                    .borrow()
-                    .axis_lines
-                    .iter()
-                    .cloned()
-                    .flat_map(|(a, b)| [Vector2::new(a.x, a.y), Vector2::new(b.x, b.y)])
-                    .collect();
-                if let Ok(lines) = ortho_center_optimize_y(
-                    self.image_state.as_ref().unwrap().image_size.width
-                        / self.image_state.as_ref().unwrap().image_size.height,
-                    lines,
-                ) {
-                    axis_data.borrow_mut().axis_lines = lines
-                        .chunks(2)
-                        .map(|items| {
-                            (
-                                Point::new(items[0].x, items[0].y),
-                                Point::new(items[1].x, items[1].y),
-                            )
-                        })
-                        .collect();
-                    self.update(Message::CalculatePoseUsingVanishingPoint);
-                };
             }
             Message::ZoomChanged(zoom) => self.image_state.as_mut().unwrap().zoom = zoom,
             Message::FieldOfViewChanged(field_of_view) => {
@@ -978,7 +666,7 @@ impl Perspective {
             .replace(reference_cube);
     }
     fn view(&self) -> Element<'_, Message> {
-        let Some(image_state) = self.image_state.as_ref() else {
+        let Some(_image_state) = self.image_state.as_ref() else {
             return center(
                 row![
                     button("Click").on_press(Message::LoadImage),
@@ -992,19 +680,6 @@ impl Perspective {
         };
 
         let component: Element<Message> = match self.mode {
-            UiMod::Pose => ComputeCameraPose::new(
-                Rc::clone(image_state.axis_data.as_ref().unwrap()),
-                Rc::clone(&self.image_state.as_ref().unwrap().draw_lines),
-                Rc::clone(&self.image_state.as_ref().unwrap().reference_cube),
-                &self.image_state.as_ref().unwrap().compute_solution,
-                Rc::clone(&self.image_state.as_ref().unwrap().custom_origin_translation),
-                Rc::clone(&self.image_state.as_ref().unwrap().custom_scale_segment),
-                Rc::clone(&self.image_state.as_ref().unwrap().custom_scale),
-            )
-            .image_size(self.image_state.as_ref().unwrap().image_size)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
             UiMod::Twist => ComputeCameraPoseTwist::new(
                 Rc::clone(&self.image_state.as_ref().unwrap().reference_cube),
                 &self.image_state.as_ref().unwrap().compute_solution,
@@ -1041,90 +716,6 @@ impl Perspective {
         let canvas_with_context_menu = ContextMenu::new(canvas, move || {
             let mut buttons = Vec::new();
             match self.mode {
-                UiMod::Pose => {
-                    buttons.push(
-                        mouse_area(container("Perform calculations").width(Length::Fill))
-                            .on_press(Message::CalculatePoseUsingVanishingPoint)
-                            .into(),
-                    );
-                    buttons.push(
-                        mouse_area(container("Apply Translation").width(Length::Fill))
-                            .on_press(Message::ApplyTranslation)
-                            .into(),
-                    );
-                    buttons.push(
-                        mouse_area(container("Reset Translation").width(Length::Fill))
-                            .on_press(Message::ResetTranslation)
-                            .into(),
-                    );
-                    buttons.push(
-                        mouse_area(container("Apply Scale").width(Length::Fill))
-                            .on_press(Message::ApplyScale)
-                            .into(),
-                    );
-                    buttons.push(
-                        mouse_area(container("Apply Scale to Dimension").width(Length::Fill))
-                            .on_press(Message::ScaleToDimension)
-                            .into(),
-                    );
-                    buttons.push(
-                        mouse_area(container("Reset Scale").width(Length::Fill))
-                            .on_press(Message::ResetScale)
-                            .into(),
-                    );
-                    buttons.push(
-                        mouse_area(container("Flip X").width(Length::Fill))
-                            .on_press(Message::Flip(
-                                !image_state.axis_data.as_ref().unwrap().borrow().flip.0,
-                                image_state.axis_data.as_ref().unwrap().borrow().flip.1,
-                                image_state.axis_data.as_ref().unwrap().borrow().flip.2,
-                            ))
-                            .into(),
-                    );
-                    buttons.push(
-                        mouse_area(container("Flip Y").width(Length::Fill))
-                            .on_press(Message::Flip(
-                                image_state.axis_data.as_ref().unwrap().borrow().flip.0,
-                                !image_state.axis_data.as_ref().unwrap().borrow().flip.1,
-                                image_state.axis_data.as_ref().unwrap().borrow().flip.2,
-                            ))
-                            .into(),
-                    );
-                    buttons.push(
-                        mouse_area(container("Flip Z").width(Length::Fill))
-                            .on_press(Message::Flip(
-                                image_state.axis_data.as_ref().unwrap().borrow().flip.0,
-                                image_state.axis_data.as_ref().unwrap().borrow().flip.1,
-                                !image_state.axis_data.as_ref().unwrap().borrow().flip.2,
-                            ))
-                            .into(),
-                    );
-                    buttons.push(
-                        mouse_area(container("Export Pose To FSpy").width(Length::Fill))
-                            .on_press(Message::ExportToFSpy)
-                            .into(),
-                    );
-                    buttons.push(
-                        mouse_area(container("Save lines").width(Length::Fill))
-                            .on_press(Message::Save)
-                            .into(),
-                    );
-                    buttons.push(
-                        mouse_area(container("Optimize").width(Length::Fill))
-                            .on_press(Message::Optimize)
-                            .into(),
-                    );
-                    buttons.push(
-                        mouse_area(container("Optimize X axis").width(Length::Fill))
-                            .on_press(Message::OptimizeX)
-                            .into(),
-                    );
-                    buttons.push(
-                        mouse_area(container("Optimize Y axis").width(Length::Fill))
-                            .on_press(Message::OptimizeY)
-                            .into(),
-                    );
-                }
                 UiMod::Twist => {
                     buttons.push(
                         mouse_area(container("Export Pose To FSpy").width(Length::Fill))
@@ -1146,19 +737,6 @@ impl Perspective {
             column(buttons).width(300).padding(5).spacing(7).into()
         });
         let field_of_view_element = match self.mode {
-            UiMod::Pose => {
-                let field_of_view = if let Some(compute_solution) =
-                    &self.image_state.as_ref().unwrap().compute_solution
-                {
-                    format!(
-                        "Field of view: {:.2} degrees",
-                        compute_solution.field_of_view().to_degrees(),
-                    )
-                } else {
-                    "Focal length not avaliable. Compute the solution".into()
-                };
-                container(column![text(field_of_view)])
-            }
             UiMod::Twist => container(column![
                 text(format!(
                     "Field of view {:.1} degrees",
@@ -1174,7 +752,6 @@ impl Perspective {
         };
 
         let mode = match self.mode {
-            UiMod::Pose => text("Pose Mode"),
             UiMod::Twist => text("Twist Mode"),
         };
         column!(
