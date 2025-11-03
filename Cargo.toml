@@ -1,0 +1,46 @@
+[package]
+name = "perspective"
+version = "0.1.0"
+edition = "2024"
+publish = false
+default-run = "perspective"
+
+[lib]
+name = "perspective"
+path = "src/lib.rs"
+
+
+[dependencies]
+anyhow = "1.0.100"
+clap = { version = "4.5.49", features = ["derive"] }
+iced.workspace = true
+image = "0.25.8"
+nalgebra.workspace = true
+num-traits.workspace = true
+optimization = "0.2.0"
+serde = { version = "1.0.228", features = ["serde_derive"] }
+serde_json = "1.0.145"
+tokio = { version = "1.48.0", features = ["fs", "io-util", "macros", "rt"] }
+tokio-util = { version = "0.7.16", features = ["codec"] }
+tracing = "0.1.41"
+
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+zoomer = {path = "components/zoomer"}
+lambda-twist = "0.7.0"
+cv-pinhole = { version = "0.6.0" }
+cv-core = "0.15"
+arrayvec = "0.5.2"
+cv = "0.6"
+rand_distr = "0.3.0"
+rfd = "0.15.4"
+#arrsac = "0.10.0"
+rand = { version = "0.8.4", features = ["small_rng"] }
+
+[workspace]
+members=["components/*"]
+
+[workspace.dependencies]
+iced = { git = "https://github.com/iced-rs/iced.git", branch = "master", features = ["debug", "tokio", "canvas", "image", "advanced"] }
+tracing = "0.1.41"
+nalgebra = "0.34.1"
+num-traits = "0.2.19"

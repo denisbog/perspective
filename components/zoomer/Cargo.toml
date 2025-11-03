@@ -1,0 +1,11 @@
+[package]
+name = "zoomer"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+iced.workspace = true
+iced.features = ["advanced"]
+tracing.workspace = true
+nalgebra.workspace = true
