@@ -743,7 +743,7 @@ impl Perspective {
                     self.image_state.as_ref().unwrap().field_of_view
                 )),
                 slider(
-                    90.0f32..=110.0f32,
+                    1.0f32..=130.0f32,
                     self.image_state.as_ref().unwrap().field_of_view,
                     Message::FieldOfViewChanged
                 )

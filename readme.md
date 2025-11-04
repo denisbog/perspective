@@ -21,3 +21,10 @@ k3=-.008
 field of view = 100.9
 
 ```
+
+## build
+
+```sh
+cargo build --release
+cross build --target x86_64-pc-windows-gnu --release
+```
