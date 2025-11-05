@@ -140,15 +140,15 @@ impl Perspective {
             let reference_cub = Rc::new(RefCell::new(vec![Point3::<f32>::new(0.0, 0.0, 0.0)]));
 
             let twist_points = Rc::new(RefCell::new(vec![
-                Point3::new(1.0, 0.0, 0.0),
-                Point3::new(0.0, 1.0, 0.0),
-                Point3::new(0.0, 0.0, 1.0),
+                Point3::new(-1.0, -1.0, -1.0),
+                Point3::new(1.0, -1.0, 1.0),
+                Point3::new(1.0, 1.0, -1.0),
             ]));
 
             let twist_points_2d = Rc::new(RefCell::new(vec![
-                Point2::new(0.4, 0.6),
-                Point2::new(0.6, 0.6),
-                Point2::new(0.5, 0.4),
+                Point2::new(0.33145836, 0.672037),
+                Point2::new(0.49192706, 0.41689816),
+                Point2::new(0.6676042, 0.6798148),
             ]));
 
             let editor_component_1 =

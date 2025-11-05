@@ -131,17 +131,17 @@ impl Default for AxisData {
             custom_origin_translation: None,
             custom_scale: None,
             twist_points: Some(vec![
-                Point3::new(1.0, 0.0, 0.0),
-                Point3::new(0.0, 1.0, 0.0),
-                Point3::new(0.0, 0.0, 0.0),
+                Point3::new(-1.0, -1.0, -1.0),
+                Point3::new(1.0, -1.0, 1.0),
+                Point3::new(1.0, 1.0, -1.0),
             ]),
 
             twist_points_2d: Some(vec![
-                Point2::new(0.4, 0.6),
-                Point2::new(0.6, 0.6),
-                Point2::new(0.5, 0.4),
+                Point2::new(0.33145836, 0.672037),
+                Point2::new(0.49192706, 0.41689816),
+                Point2::new(0.6676042, 0.6798148),
             ]),
-            field_of_view: Some(102.0),
+            field_of_view: Some(35.0),
         }
     }
 }
